@@ -1,6 +1,6 @@
 # **Antigravity Discord Bot (WSL \+ Local LLM)**
 
-WSL2上で動作する、ローカルLLM（Ollama）と連携したAI Discord Botです。
+WSL2上で動作する、ローカルLLM（Ollama）と連携した10代女子風AI Discord Botです。
 
 サーバー負荷確認（/load）や、レートリミット付きのAIチャット機能を備えています。
 
@@ -11,7 +11,43 @@ WSL2上で動作する、ローカルLLM（Ollama）と連携したAI Discord Bo
 * **Ollama**: WSL上で動作していること  
 * **Hardware**: メモリ 8GB以上（16GB以上推奨）
 
-## **🚀 セットアップ手順**
+## **🛠️ Discord Botの準備と設定**
+
+Botを動かす前に、Discord側でアプリケーションの作成とトークンの取得が必要です。
+
+### **1\. Botの作成とトークン取得**
+
+1. [Discord Developer Portal](https://discord.com/developers/applications) にアクセスし、ログインします。  
+2. **\[New Application\]** をクリックし、任意の名前を入力して作成します。  
+3. 左メニューの **\[Bot\]** を選択します。  
+4. **\[Reset Token\]**（または Copy Token）をクリックし、表示された文字列をコピーします。  
+   * **重要**: このトークンは config.yaml の bot\_token に使用します。他人に教えないでください。
+
+### **2\. 特権インテント（Privileged Gateway Intents）の設定**
+
+メッセージの中身を読み取るために必須の設定です。
+
+1. 同じく **\[Bot\]** ページ内の **Privileged Gateway Intents** セクションを探します。  
+2. **MESSAGE CONTENT INTENT** を **ON** に切り替え、\[Save Changes\] をクリックします。
+
+### **3\. Botの招待（サーバーへの追加）**
+
+1. 左メニューの **\[OAuth2\]** \> **https://www.homedepot.com/b/Outdoors-Outdoor-Power-Equipment-Generators/N-5yc1vZbx8l** を選択します。  
+2. **Scopes** で bot にチェックを入れます。  
+3. **Bot Permissions** で Send Messages、Read Message History、View Channels にチェックを入れます。  
+4. 生成されたURLをブラウザで開き、Botを追加したいサーバーを選択して追加します。
+
+## **🆔 チャンネルIDの取得方法**
+
+Botが監視する特定のチャンネルIDを特定する手順です。
+
+1. Discordアプリ左下の **\[ユーザー設定\]**（歯車アイコン）を開きます。  
+2. **\[詳細設定\]** (Advanced) を選択し、**\[開発者モード\]** を **ON** にします。  
+3. 設定を閉じ、監視したいチャンネル名を **右クリック** します。  
+4. 一番下に表示される **\[チャンネルIDをコピー\]** をクリックします。  
+   * この数字を config.yaml の channel\_ids リストに貼り付けます。
+
+## **🚀 セットアップ手順（プログラム側）**
 
 ### **1\. リポジトリの取得**
 
@@ -31,46 +67,19 @@ pip install \-r requirements.txt
 
 ### **3\. 設定ファイル（config.yaml）の作成**
 
-セキュリティのため config.yaml はGit管理から除外しています。
+リポジトリ直下に config.yaml を新規作成し、取得したトークン等を記述してください。
 
-リポジトリ直下に新規作成し、以下の内容を記述してください。
-
-\# Discord設定  
-bot\_token: "YOUR\_DISCORD\_BOT\_TOKEN"  
-channel\_id: 123456789012345678  \# 監視するチャンネルID  
-bot\_name: "Antigravity"         \# Botの表示名  
-icon\_path: "./icon.png"         \# アイコン画像のパス
-
-\# レートリミット設定 (おしゃべり機能)  
-rate\_limit\_seconds: 10          \# 判定秒数  
-rate\_limit\_count: 3             \# 許可回数
-
-\# 優先キーワード (レートリミットを無視して反応)  
-priority\_keywords:  
-  \- "緊急"  
-  \- "ヘルプ"  
-  \- "おーい"
-
-\# AI設定 (Ollama)  
-ai\_model: "pakachan/elyza-llama3-8b"  
-system\_prompt: \>  
-  あなたは10代の明るい女の子です。  
-  「～だよ！」「～だねっ✨」といった元気な口調で、友達みたいに話してね！
-
-\# コマンドリスト  
-commands:  
-  \- "/ping"  
-  \- "/hello"  
-  \- "/load"
+bot\_token: "取得したトークン"  
+channel\_ids:  
+  \- 123456789012345678 \# コピーしたチャンネルID  
+bot\_name: "Antigravity"  
+\# ...その他AI設定等
 
 ### **4\. Ollamaとモデルの準備**
 
-WSL環境にOllamaをインストールし、使用するモデルをプルします。
-
-\# Ollamaのインストール (未導入の場合)  
-curl \-fsSL \[https://ollama.com/install.sh\](https://ollama.com/install.sh) | sh
-
-\# 日本語モデルのダウンロード  
+\# Ollamaインストール  
+curl \-fsSL \[https://ollama.com/install.sh\](https://ollama.com/install.sh) | sh  
+\# モデルのダウンロード  
 ollama pull pakachan/elyza-llama3-8b
 
 ## **🏃 実行方法**
@@ -94,7 +103,6 @@ ollama pull pakachan/elyza-llama3-8b
 
 * main.py: メインスクリプト  
 * config.yaml: 設定ファイル（Git管理外）  
-* requirements.txt: 必要ライブラリ  
 * cogs/: 機能モジュール  
-  * system.py: システム系コマンド（load, ping等）  
-  * chat.py: AI連携おしゃべり機能（レートリミット込）
+  * system.py: 負荷確認、基本コマンド  
+  * chat.py: AI連携おしゃべり機能
