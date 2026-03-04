@@ -1,7 +1,7 @@
-# **Antigravity Discord Bot (WSL \+ Local LLM)**
+# **SME Discord Bot (WSL \+ Local LLM)**
 
-WSL2上で動作する、ローカルLLM（Ollama）と連携した10代女子風AI Discord Botです。
-
+WSL2上で動作する、ローカルLLM（Ollama）と連携したAI Discord Botです。
+使用モデルやキャラクタ設定（プロンプト）はconfig.yamlで変更可能です。
 サーバー負荷確認（/load）や、レートリミット付きのAIチャット機能を備えています。
 
 ## **📋 前提条件**
@@ -106,3 +106,15 @@ ollama pull pakachan/elyza-llama3-8b
 * cogs/: 機能モジュール  
   * system.py: 負荷確認、基本コマンド  
   * chat.py: AI連携おしゃべり機能
+  * game.py: ゲームサーバー管理機能
+
+## **🎮 ゲームサーバー管理機能**
+以下のコマンドで、ローカルAPI（デフォルト: localhost:5000）経由でサーバーを操作(APIアクセス)できます。
+
+* /gs\_list: サーバー名、状態（オンライン/オフライン）、プレイヤー数、ゲーム内日数、リソース使用率の一覧を表示します。  
+* /gs\_start \<サーバー名\>: 指定したサーバーを起動します。  
+* /gs\_stop \<サーバー名\>: 指定したサーバーを停止します。
+
+## **📖 API仕様 (Contract)**
+Botが連携するゲームサーバー管理APIの詳細な仕様については、以下のファイルを参照してください。
+* [API\_CONTRACT.md](https://www.google.com/search?q=./API_CONTRACT.md)
