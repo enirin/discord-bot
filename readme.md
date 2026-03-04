@@ -117,4 +117,9 @@ ollama pull pakachan/elyza-llama3-8b
 
 ## **📖 API仕様 (Contract)**
 Botが連携するゲームサーバー管理APIの詳細な仕様については、以下のファイルを参照してください。
-* [API\_CONTRACT.md](https://www.google.com/search?q=./API_CONTRACT.md)
+* [API\_CONTRACT.md](https://github.com/enirin/discord-bot/blob/main/api_contract.md)
+
+## **🎮 動作確認用　モックAPIサーバーの起動**
+```bash
+./venv/bin/python mock_api_server.py
+```

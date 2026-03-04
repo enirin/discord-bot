@@ -10,3 +10,5 @@ propcache==0.4.1
 PyYAML==6.0.3
 typing_extensions==4.15.0
 yarl==1.23.0
+Flask==3.0.3
+Werkzeug==3.0.1
