@@ -1,7 +1,9 @@
 # config.yaml
 # config.yaml.sampleとなっている場合は内容を修正してconfig.yamlにリネームしてください
 bot_token: "tokenをここに入力"
-channel_id: チャンネルIDをここに入力  # 監視するチャンネルID（整数）
+channel_ids:
+  - 123456789012345678  # 1つ目のチャンネルID
+  - 987654321098765432  # 2つ目のチャンネルID（必要に応じて増やす）
 bot_name: "botの名前を入力"
 icon_path: "./icon.png"  # 実行ディレクトリに画像を置いてください
 

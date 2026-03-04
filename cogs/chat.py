@@ -22,7 +22,7 @@ class Chat(commands.Cog):
             return
 
         # 2. 監視対象のチャンネル以外は無視
-        if message.channel.id != self.config['channel_id']:
+        if message.channel.id not in self.config['channel_ids']:
             return
 
         # 3. コマンド（/から始まる）の場合は処理しない

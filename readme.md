@@ -81,6 +81,15 @@ ollama pull pakachan/elyza-llama3-8b
 2. **Botを起動**  
    python main.py
 
+### 💡 「時短テクニック」
+
+毎回 `source ...` と打つのが面倒な場合、実は**「仮想環境の中にあるPython」を直接指定して実行**することもできます。
+
+```bash
+# activateしなくても、これで動きます
+./venv/bin/python main.py
+```
+
 ## **📂 ディレクトリ構造**
 
 * main.py: メインスクリプト  

@@ -9,7 +9,7 @@ with open("config.yaml", "r", encoding="utf-8") as f:
     config = yaml.safe_load(f)
 
 TOKEN = config['bot_token']
-TARGET_CHANNEL_ID = config['channel_id']
+TARGET_CHANNEL_IDS = config['channel_ids']
 BOT_NAME = config['bot_name']
 ICON_PATH = config['icon_path']
 
@@ -67,7 +67,7 @@ async def on_message(self, message):
             return
 
         # 2. 監視対象チャンネル以外は無視
-        if message.channel.id != TARGET_CHANNEL_ID:
+        if message.channel.id not in TARGET_CHANNEL_IDS:
             return
 
         # 3. メッセージがコマンドプレフィックスで始まる場合
