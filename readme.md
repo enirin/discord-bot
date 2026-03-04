@@ -51,8 +51,8 @@ Botが監視する特定のチャンネルIDを特定する手順です。
 
 ### **1\. リポジトリの取得**
 
-git clone \<あなたのリポジトリURL\>  
-cd \<リポジトリ名\>
+git clone https://github.com/enirin/discord-bot.git  
+cd discord-bot
 
 ### **2\. Python仮想環境の構築**
 
@@ -72,7 +72,7 @@ pip install \-r requirements.txt
 bot\_token: "取得したトークン"  
 channel\_ids:  
   \- 123456789012345678 \# コピーしたチャンネルID  
-bot\_name: "Antigravity"  
+bot\_name: "MySME BOTちゃん"  
 \# ...その他AI設定等
 
 ### **4\. Ollamaとモデルの準備**
