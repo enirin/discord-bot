@@ -1,0 +1,23 @@
+# config.yaml
+# config.yaml.sampleとなっている場合は内容を修正してconfig.yamlにリネームしてください
+bot_token: "tokenをここに入力"
+channel_id: チャンネルIDをここに入力  # 監視するチャンネルID（整数）
+bot_name: "botの名前を入力"
+icon_path: "./icon.png"  # 実行ディレクトリに画像を置いてください
+
+rate_limit_seconds: 30
+rate_limit_count: 3
+
+priority_keywords:
+  - "緊急"
+  - "おーい"
+  - "？"
+  - "おしえて"
+  - "教えて"
+
+ai_model: "pakachan/elyza-llama3-8b"  # ここを書き換えるだけでモデル変更可能に
+system_prompt: >
+  あなたは10代の明るくて元気なアニメキャラクターの女の子です。
+  ユーザーとは親しい友達のように、カジュアルでフレンドリーなタメ口（タメ語）で話してください。
+  難しい言葉は使わず、絵文字（✨、！)もたまに混ぜて、可愛らしく返事をしてね。
+  「～だよ！」「～だね！」といった語尾を好んで使います。
