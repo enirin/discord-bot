@@ -142,10 +142,13 @@ ollama pull pakachan/elyza-llama3-8b
 
 * main.py: メインスクリプト  
 * config.yaml: 設定ファイル（Git管理外）  
+* API_CONTRACT.md: 連携APIの仕様書
 * cogs/: 機能モジュール  
   * system.py: 負荷確認、基本コマンド  
   * chat.py: AI連携おしゃべり機能
   * game.py: ゲームサーバー管理機能
+* web/: 管理ダッシュボード用Reactサーバー  
+* mock_api_server.py: 動作確認証FlaskMockサーバー
 
 ## **🎮 ゲームサーバー管理機能**
 
@@ -160,4 +163,28 @@ ollama pull pakachan/elyza-llama3-8b
 
 ```bash
 ./venv/bin/python mock_api_server.py
+```
+
+## **🎮 Webダッシュボードサーバーの起動**
+
+### 事前準備
+
+1. Web Dashboard (React) の起動に必要なNode環境のセットアップ
+
+```bash
+# Node.js 20系をインストール (Ubuntu)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# インストール確認
+node -v
+npm -v
+```
+
+### Web Dashboard (React) の起動
+
+```bash
+cd web
+npm install
+npm run dev -- --host
 ```
