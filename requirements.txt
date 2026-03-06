@@ -12,3 +12,4 @@ typing_extensions==4.15.0
 yarl==1.23.0
 Flask==3.0.3
 Werkzeug==3.0.1
+flask-cors==5.0.1
