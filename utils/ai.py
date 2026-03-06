@@ -1,6 +1,6 @@
 import aiohttp
 
-async def generate_ai_response(target_message_or_text, config, reply_target=None):
+async def generate_ai_response(target_message_or_text, config, reply_target=None, conversation_history=None):
     """
     Ollama APIを利用してAIの返信を生成し、Discordに送信する汎用関数。
 
@@ -9,6 +9,8 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
         config: Botの設定情報辞書 (システムプロンプトやモデル名を取得)
         reply_target: 返信先となるDiscordのMessageオブジェクトやContextオブジェクト。
                       target_message_or_text がMessageオブジェクトの場合は省略可能。
+        conversation_history: 会話履歴リスト [{"role": "user"/"assistant", "content": "..."}]
+                              Noneの場合は単発リクエスト（コマンド系）として扱う。
     """
 
     # プロンプトの抽出と返信先の決定
@@ -31,14 +33,26 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
     )    
 
     target_model = config.get('ai_model', "llama3.2")
-    ollama_url = config.get('ollama_url', "http://localhost:11434/api/generate")
+    ollama_url = config.get('ollama_url', "http://localhost:11434/api/chat")
 
-    payload = {
-        "model": target_model, 
-        "prompt": prompt_text,
-        "system": system_instruction, 
-        "stream": False 
-    }
+    # 会話履歴がある場合は /api/chat エンドポイントを使ってコンテキストを渡す
+    if conversation_history is not None:
+        # 既存の履歴をコピーして末尾に今回のメッセージを追加
+        messages = list(conversation_history) + [{"role": "user", "content": prompt_text}]
+        payload = {
+            "model": target_model,
+            "messages": messages,
+            "system": system_instruction,
+            "stream": False
+        }
+    else:
+        # コマンド系は単発メッセージとして送信
+        payload = {
+            "model": target_model,
+            "messages": [{"role": "user", "content": prompt_text}],
+            "system": system_instruction,
+            "stream": False
+        }
 
     # 入力中アクションを表示できる場合は表示する
     typing_manager = None
@@ -59,7 +73,9 @@ async def _send_request(ollama_url, payload, reply_target):
             async with session.post(ollama_url, json=payload) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    response_text = data.get("response", "ごめんなさい、うまく考えられませんでした。")
+                    # /api/chat のレスポンス形式: data["message"]["content"]
+                    message_obj = data.get("message", {})
+                    response_text = message_obj.get("content", "ごめんなさい、うまく考えられませんでした。")
                     await reply_target.reply(response_text)
                     return {"success": True, "response": response_text}
                 else:
