@@ -89,10 +89,12 @@ bot\_name: "MySME BOTちゃん"
 ### **4\. Ollamaとモデルの準備**
 こちらはAI機能を利用する場合に必要です。同じ環境に任意の言語モデルをダウンロードし、自前のPC内でAIを動かせるようになります。必要なのはそこそこのスペックと電気代だけです。
 
-\# Ollamaインストール  
-curl \-fsSL \[https://ollama.com/install.sh\](https://ollama.com/install.sh) | sh  
-\# モデルのダウンロード  
+```bash
+# Ollamaインストール  
+curl -fsSL https://ollama.com/install.sh | sh  
+# モデルのダウンロード  
 ollama pull pakachan/elyza-llama3-8b
+```
 
 ## **🏃 実行方法**
 
