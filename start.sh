@@ -20,5 +20,21 @@ if [ ! -f "config.yaml" ]; then
     exit 1
 fi
 
+# Ollamaの起動状態を確認し、未起動であれば起動する
+echo "🤖 Ollamaの起動状態を確認しています..."
+if ollama list > /dev/null 2>&1; then
+    echo "✅ Ollamaはすでに起動しています。"
+else
+    echo "⚡ Ollamaが起動していません。バックグラウンドで起動します..."
+    ollama serve > /dev/null 2>&1 &
+    sleep 5
+    if ollama list > /dev/null 2>&1; then
+        echo "✅ Ollamaを起動しました。"
+    else
+        echo "❌ Ollamaの起動に失敗しました。'ollama serve' を手動で実行してから再度お試しください。"
+        exit 1
+    fi
+fi
+
 echo "🚀 Botを起動しています..."
 ./venv/bin/python main.py
