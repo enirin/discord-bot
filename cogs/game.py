@@ -48,7 +48,7 @@ class GameServer(commands.Cog, name="ゲームサーバー管理"):
                 )
                 embed.add_field(name=name, value=info, inline=False)
             
-            prompt = f"システム情報: 現在{len(servers)}個のゲームサーバーの状態を取得しました。一覧のカードを表示するので、あなたの言葉で短く案内してください。"
+            prompt = f"システム情報: 現在{len(servers)}個のゲームサーバーの状態を取得し表示しました。これから管理しているゲームサーバーの一覧とそれぞれ現在の詳細状況が表示されるということを、あなたの言葉で短く案内してください。"
             await generate_ai_response(prompt, self.config, reply_target=ctx)
             await ctx.reply(embed=embed)
 
