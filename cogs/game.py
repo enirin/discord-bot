@@ -1,7 +1,9 @@
 import discord
 from discord.ext import commands
-import aiohttp
 import yaml
+from utils.ai import generate_ai_response
+from utils.game_api import GameServerAPI
+from utils.ai import generate_ai_response
 
 class GameServer(commands.Cog, name="ゲームサーバー管理"):
     """ゲームサーバーの起動・停止・状態確認を行うコマンド群"""
@@ -9,80 +11,105 @@ class GameServer(commands.Cog, name="ゲームサーバー管理"):
     def __init__(self, bot, config):
         self.bot = bot
         self.config = config
-        # APIのベースURL (末尾のスラッシュを削除しておく)
-        self.base_url = self.config.get('game_api_url', 'http://localhost:5000').rstrip('/')
+        base_url = self.config.get('game_api_url', 'http://localhost:5000')
+        self.api = GameServerAPI(base_url)
 
     @commands.command(name="gs_list", help="管理下のゲームサーバー一覧とステータスを表示します。")
     async def list_servers(self, ctx):
-        """GET /list を呼び出してサーバー一覧を表示"""
+        """APIからサーバー一覧を取得して表示"""
         async with ctx.typing():
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(f"{self.base_url}/list") as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            servers = data.get("servers", [])
-                            
-                            if not servers:
-                                await ctx.reply("管理対象のサーバーは見つかりませんでした。")
-                                return
+            res = await self.api.list_servers()
+            
+            if not res["success"]:
+                err = res.get("error", "不明なエラー")
+                prompt = f"システム情報: ゲームサーバー一覧の取得中にエラーが発生しました（内容: {err}）。ユーザーに謝って状況を報告してください。"
+                await generate_ai_response(prompt, self.config, reply_target=ctx)
+                return
 
-                            embed = discord.Embed(title="🎮 ゲームサーバー一覧", color=discord.Color.blue())
-                            for s in servers:
-                                name = s.get("name")
-                                status = s.get("status")
-                                # ステータスに応じて絵文字を変える
-                                status_emoji = "🟢" if status == "online" else "🔴" if status == "offline" else "🟡"
-                                
-                                stats = s.get("stats", {})
-                                info = (
-                                    f"**Status:** {status_emoji} {status}\n"
-                                    f"**Address:** `{s.get('address')}`\n"
-                                    f"**Players:** {stats.get('players')}\n"
-                                    f"**Day:** {s.get('day')}\n"
-                                    f"**Resources:** CPU {stats.get('cpu')}% / Mem {stats.get('memory')}GB"
-                                )
-                                embed.add_field(name=name, value=info, inline=False)
-                            
-                            await ctx.reply(embed=embed)
-                        else:
-                            await ctx.reply(f"APIエラーが発生しました (Status: {resp.status})")
-            except Exception as e:
-                await ctx.reply(f"接続エラー: APIサーバーが起動しているか確認してください。\n`{e}`")
+            servers = res.get("servers", [])
+            if not servers:
+                prompt = "システム情報: 登録されているゲームサーバーが一つも見つかりませんでした。ユーザーに教えてあげてください。"
+                await generate_ai_response(prompt, self.config, reply_target=ctx)
+                return
+
+            embed = discord.Embed(title="🎮 ゲームサーバー一覧", color=discord.Color.blue())
+            for s in servers:
+                name = s.get("name")
+                status = s.get("status")
+                status_emoji = "🟢" if status == "online" else "🔴" if status == "offline" else "🟡"
+                
+                stats = s.get("stats", {})
+                info = (
+                    f"**Status:** {status_emoji} {status}\n"
+                    f"**Address:** `{s.get('address')}`\n"
+                    f"**Players:** {stats.get('players')}\n"
+                    f"**Day:** {s.get('day')}\n"
+                    f"**Resources:** CPU {stats.get('cpu')}% / Mem {stats.get('memory')}GB"
+                )
+                embed.add_field(name=name, value=info, inline=False)
+            
+            prompt = f"システム情報: 現在{len(servers)}個のゲームサーバーの状態を取得しました。一覧のカードを表示するので、あなたの言葉で短く案内してください。"
+            await generate_ai_response(prompt, self.config, reply_target=ctx)
+            await ctx.reply(embed=embed)
 
     @commands.command(name="gs_start", help="指定したサーバーを起動します。引数にサーバー名が必要です。")
-    async def start_server(self, ctx, server_name: str):
-        """POST /start/{server_name} を呼び出し"""
+    async def start_server(self, ctx, server_name: str = None):
+        """指定サーバーを起動、引数がない場合は一覧を提示"""
         async with ctx.typing():
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(f"{self.base_url}/start/{server_name}") as resp:
-                        data = await resp.json()
-                        if resp.status == 200:
-                            await ctx.reply(f"✅ {data.get('message')}")
-                        elif resp.status == 404:
-                            await ctx.reply(f"❌ サーバー `{server_name}` が見つかりませんでした。")
-                        else:
-                            await ctx.reply(f"⚠️ エラー: {data.get('message', '不明なエラー')}")
-            except Exception as e:
-                await ctx.reply(f"接続エラー: {e}")
+            if not server_name:
+                await self._prompt_server_selection(ctx, "起動")
+                return
+
+            res = await self.api.start_server(server_name)
+            await self._handle_action_response(ctx, "起動", server_name, res)
 
     @commands.command(name="gs_stop", help="指定したサーバーを停止します。引数にサーバー名が必要です。")
-    async def stop_server(self, ctx, server_name: str):
-        """POST /stop/{server_name} を呼び出し"""
+    async def stop_server(self, ctx, server_name: str = None):
+        """指定サーバーを停止、引数がない場合は一覧を提示"""
         async with ctx.typing():
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(f"{self.base_url}/stop/{server_name}") as resp:
-                        data = await resp.json()
-                        if resp.status == 200:
-                            await ctx.reply(f"🛑 {data.get('message')}")
-                        elif resp.status == 404:
-                            await ctx.reply(f"❌ サーバー `{server_name}` が見つかりませんでした。")
-                        else:
-                            await ctx.reply(f"⚠️ エラー: {data.get('message', '不明なエラー')}")
-            except Exception as e:
-                await ctx.reply(f"接続エラー: {e}")
+            if not server_name:
+                await self._prompt_server_selection(ctx, "停止")
+                return
+
+            res = await self.api.stop_server(server_name)
+            await self._handle_action_response(ctx, "停止", server_name, res)
+
+    async def _prompt_server_selection(self, ctx, action_name: str):
+        """サーバー名が指定されなかった場合に一覧を取得し、ユーザーに選ばせるためのプロンプトをAIに投げる"""
+        res = await self.api.list_servers()
+        if not res["success"]:
+            prompt = f"システム情報: ユーザーがサーバーの{action_name}をしようとしましたがサーバー名の指定がありませんでした。さらにサーバー一覧を取得しようとしましたがエラー（内容: {res.get('error', '不明')}）が発生しました。謝罪してください。"
+            await generate_ai_response(prompt, self.config, reply_target=ctx)
+            return
+
+        servers = res.get("servers", [])
+        if not servers:
+            prompt = f"システム情報: ユーザーがサーバーの{action_name}をしようとしましたがサーバー名の指定がなく、管理対象のサーバーも1つも登録されていません。ユーザーに登録されていない旨を教えてあげてください。"
+            await generate_ai_response(prompt, self.config, reply_target=ctx)
+            return
+
+        server_names = ", ".join([f"「{s['name']}」" for s in servers])
+        prompt = f"システム情報: ユーザーがサーバーの{action_name}をしようとしましたが、サーバー名の指定（引数）がありませんでした。現在登録されているサーバーは {server_names} です。ユーザーに、どのサーバーを{action_name}したいのか尋ねて（コマンドにサーバー名をつけてね、と添えて）ください。"
+        await generate_ai_response(prompt, self.config, reply_target=ctx)
+
+    async def _handle_action_response(self, ctx, action_name: str, server_name: str, res: dict):
+        """起動/停止コマンド共通のレスポンス処理ルーチン"""
+        if not res["success"] and res.get("is_connection_error"):
+            prompt = f"システム情報: ゲームサーバー「{server_name}」の{action_name}処理中に接続エラーが発生しました（エラー: {res.get('error')}）。ユーザーに伝えてください。"
+            await generate_ai_response(prompt, self.config, reply_target=ctx)
+            return
+
+        status = res.get("status")
+        data = res.get("data", {})
+        
+        if status == 200:
+            prompt = f"システム情報: ユーザーがゲームサーバー「{server_name}」を{action_name}させる依頼があったため実行しました。APIからの応答は「{data.get('message')}」です。お礼や報告の言葉を添えてユーザーに教えてあげてください。"
+        elif status == 404:
+            prompt = f"システム情報: ゲームサーバー「{server_name}」を{action_name}しようとしましたが、そんな名前のサーバーは見つかりませんでした。ユーザーに、名前が間違っているかもしれないと教えてあげてください。"
+        else:
+            prompt = f"システム情報: ゲームサーバー「{server_name}」を{action_name}しようとしましたが、エラーが発生しました（内容: {data.get('message', '不明なエラー')}）。状況を報告してください。"
+            
+        await generate_ai_response(prompt, self.config, reply_target=ctx)
 
 async def setup(bot):
     with open("config.yaml", "r", encoding="utf-8") as f:

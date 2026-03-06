@@ -4,6 +4,7 @@ import time
 import yaml
 import aiohttp
 import json
+from utils.ai import generate_ai_response
 
 class Chat(commands.Cog):
     def __init__(self, bot, config):
@@ -13,7 +14,6 @@ class Chat(commands.Cog):
         self.user_history = {}
         # コンフィグから優先キーワードを取得（なければ空リスト）
         self.priority_keywords = self.config.get('priority_keywords', [])
-        self.ollama_url = "http://localhost:11434/api/generate"
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -34,14 +34,15 @@ class Chat(commands.Cog):
         is_priority = any(kw in message.content for kw in self.priority_keywords)
 
         if is_priority:
-            await message.reply("優先キーワードを検知しました！即座に対応します。")
-            return # ここで処理を終了させることで、下のレートリミット判定を通らない
+            # 優先キーワードが含まれる場合は、レートリミット判定をバイパスして即座にAIへ送信
+            await self._generate_ai_response(message)
+            return
 
         # --- レートリミットの判定 ---
         user_id = message.author.id
         now = time.time()
-        limit_sec = self.config['rate_limit_seconds']
-        limit_count = self.config['rate_limit_count']
+        limit_sec = self.config.get('rate_limit_seconds', 30)
+        limit_count = self.config.get('rate_limit_count', 3)
 
         # そのユーザーの履歴がなければ作成
         if user_id not in self.user_history:
@@ -60,32 +61,12 @@ class Chat(commands.Cog):
         self.user_history[user_id].append(now)
 
         # --- AIへのリクエスト ---
-        # ユーザーが「入力中...」になるようにアクションを表示
-        async with message.channel.typing():
-            # configからシステムプロンプトを取得
-            system_instruction = self.config.get('system_prompt', "You are a helpful assistant.")
-            # configからモデル名を取得。なければデフォルトで llama3.2
-            target_model = self.config.get('ai_model', "llama3.2")
-
-            payload = {
-                "model": target_model, # 使用するモデル名
-                "prompt": message.content,
-                "system": system_instruction, # ここに性格設定を渡す
-                "stream": False # ストリーミングなし（一括回答）
-            }
-
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(self.ollama_url, json=payload) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            response_text = data.get("response", "ごめんなさい、うまく考えられませんでした。")
-                            await message.reply(response_text)
-                        else:
-                            await message.reply("AIサーバーが応答していません。")
-            except Exception as e:
-                print(f"エラーが発生しました: {e}")
-                await message.reply("エラーが発生したため、おしゃべり機能（定型文モード）です。" + str(len(self.user_history[user_id])) + "messages for " + str(message.author))
+        result = await generate_ai_response(message, self.config)
+        if not result.get("success"):
+            # 汎用エラーとは別に、このCog独自の履歴件数を追加で表示する
+            user_id = message.author.id
+            history_count = len(self.user_history.get(user_id, []))
+            await message.reply(f"(おしゃべり機能履歴: {history_count}件 / {message.author})")
 
 async def setup(bot):
     # main.pyから渡されるconfigを利用できるようにする
