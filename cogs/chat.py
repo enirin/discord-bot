@@ -35,7 +35,9 @@ class Chat(commands.Cog):
 
         if is_priority:
             # 優先キーワードが含まれる場合は、レートリミット判定をバイパスして即座にAIへ送信
-            await self._generate_ai_response(message)
+            result = await generate_ai_response(message, self.config)
+            if not result.get("success"):
+                await message.reply("(優先キーワードでの応答に失敗しました)")
             return
 
         # --- レートリミットの判定 ---
