@@ -14,7 +14,7 @@ class GameServer(commands.Cog, name="ゲームサーバー管理"):
         base_url = self.config.get('game_api_url', 'http://localhost:5000')
         self.api = GameServerAPI(base_url)
 
-    @commands.command(name="gs_list", help="管理下のゲームサーバー一覧とステータスを表示します。")
+    @commands.hybrid_command(name="gs_list", description="管理下のゲームサーバー一覧とステータスを表示します。")
     async def list_servers(self, ctx):
         """APIからサーバー一覧を取得して表示"""
         async with ctx.typing():
@@ -52,7 +52,7 @@ class GameServer(commands.Cog, name="ゲームサーバー管理"):
             await generate_ai_response(prompt, self.config, reply_target=ctx)
             await ctx.reply(embed=embed)
 
-    @commands.command(name="gs_start", help="指定したサーバーを起動します。引数にサーバー名が必要です。")
+    @commands.hybrid_command(name="gs_start", description="指定したサーバーを起動します。引数にサーバー名が必要です。")
     async def start_server(self, ctx, server_name: str = None):
         """指定サーバーを起動、引数がない場合は一覧を提示"""
         async with ctx.typing():
@@ -63,7 +63,7 @@ class GameServer(commands.Cog, name="ゲームサーバー管理"):
             res = await self.api.start_server(server_name)
             await self._handle_action_response(ctx, "起動", server_name, res)
 
-    @commands.command(name="gs_stop", help="指定したサーバーを停止します。引数にサーバー名が必要です。")
+    @commands.hybrid_command(name="gs_stop", description="指定したサーバーを停止します。引数にサーバー名が必要です。")
     async def stop_server(self, ctx, server_name: str = None):
         """指定サーバーを停止、引数がない場合は一覧を提示"""
         async with ctx.typing():

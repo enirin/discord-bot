@@ -12,6 +12,7 @@ TOKEN = config['bot_token']
 TARGET_CHANNEL_IDS = config['channel_ids']
 BOT_NAME = config['bot_name']
 ICON_PATH = config['icon_path']
+GUILD_ID = config.get('guild_id', None) # 開発用・即時反映用ギルドID
 
 # ヘルプの文言を日本語化したい場合などの設定
 class MyHelp(commands.DefaultHelpCommand):
@@ -26,7 +27,7 @@ class SMEBot(commands.Bot):
         intents = discord.Intents.default()
         intents.message_content = True
         # コマンドプレフィックスを / に設定
-        super().__init__(command_prefix='/', intents=intents, help_command=MyHelp())
+        super().__init__(command_prefix='!', intents=intents, help_command=MyHelp())
 
     async def setup_hook(self):
         """起動時にCogsを読み込む"""
@@ -34,6 +35,19 @@ class SMEBot(commands.Bot):
             if filename.endswith('.py'):
                 await self.load_extension(f'cogs.{filename[:-3]}')
                 print(f'Loaded extension: {filename}')
+        
+        # SlashCommands(App Commands)をDiscord側に同期
+        try:
+            if GUILD_ID:
+                guild = discord.Object(id=GUILD_ID)
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                print(f"Synced {len(synced)} command(s) to guild {GUILD_ID}.")
+            else:
+                synced = await self.tree.sync()
+                print(f"Synced {len(synced)} command(s) globally. (Note: Global sync can take up to 1 hour to propagate.)")
+        except Exception as e:
+            print(f"Failed to sync commands: {e}")
 
     async def on_ready(self):
         print(f'Logged in as {self.user} (ID: {self.user.id})')
@@ -70,18 +84,9 @@ async def on_message(self, message):
         if message.channel.id not in TARGET_CHANNEL_IDS:
             return
 
-        # 3. メッセージがコマンドプレフィックスで始まる場合
-        if message.content.startswith(self.command_prefix):
-            ctx = await self.get_context(message)
-            
-            if ctx.valid:
-                # Cogに登録された正式なコマンドを実行
-                await self.invoke(ctx)
-            else:
-                # /から始まるが、Cogに登録されていない場合
-                await message.reply("未定義のコマンドです。")
-        else:
-            pass
+        # 3. メッセージに対するコマンド処理
+        # HybridCommand を含む従来のコマンドハンドリングを実行
+        await self.process_commands(message)
 
 # 実行
 bot = SMEBot()

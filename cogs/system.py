@@ -10,7 +10,7 @@ class System(commands.Cog, name="システム機能"):
         self.bot = bot
         self.config = config
 
-    @commands.command(name="load", help="サーバーのCPU負荷やメモリ使用率を表示します。")
+    @commands.hybrid_command(name="load", description="サーバーのCPU負荷やメモリ使用率を表示します。")
     async def load_info(self, ctx): 
         """サーバーの負荷情報を取得するコマンド"""
         try:
@@ -28,7 +28,7 @@ class System(commands.Cog, name="システム機能"):
             prompt = f"システム情報: サーバー負荷情報の取得中にエラーが発生しました（内容: {e}）。ユーザーに謝って伝えてください。"
             await generate_ai_response(prompt, self.config, reply_target=ctx)
 
-    @commands.command(name="ping", help="Botが活きているか確認します。")
+    @commands.hybrid_command(name="ping", description="Botが活きているか確認します。")
     async def ping(self, ctx):
         """疎通確認用コマンド"""
         prompt = "システム情報: ユーザーが生存確認（ping）を行いました。元気に生きていて反応できることをアピールする返信をしてください。"
