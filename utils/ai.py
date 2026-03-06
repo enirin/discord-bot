@@ -25,7 +25,10 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
     # configからシステムプロンプトとモデル名を取得
     system_instruction = config.get('system_prompt', "You are a helpful assistant.")
     bot_name = config.get('bot_name', "Bot")
-    system_instruction += f"\nあなたの名前は {bot_name} です。"
+    system_instruction += (
+        f"\nあなたの名前は「{bot_name}」です。"
+        f"ユーザーから名前の一部であったり、愛称（ちゃん付けなど）で呼ばれた場合でも、自分自身の名前として認識して自然に返答してください。"
+    )    
 
     target_model = config.get('ai_model', "llama3.2")
     ollama_url = config.get('ollama_url', "http://localhost:11434/api/generate")
