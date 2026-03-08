@@ -1,8 +1,20 @@
 import aiohttp
+import discord
+from discord.ext import commands
+
+
+def _extract_interaction(reply_target):
+    if isinstance(reply_target, discord.Interaction):
+        return reply_target
+
+    if isinstance(reply_target, commands.Context):
+        return reply_target.interaction
+
+    return None
 
 
 async def _defer_interaction_if_needed(reply_target):
-    interaction = getattr(reply_target, 'interaction', None)
+    interaction = _extract_interaction(reply_target)
     if interaction is None:
         return
 
@@ -13,7 +25,7 @@ async def _defer_interaction_if_needed(reply_target):
 
 
 async def _send_discord_response(reply_target, content):
-    interaction = getattr(reply_target, 'interaction', None)
+    interaction = _extract_interaction(reply_target)
     if interaction is not None:
         if interaction.response.is_done():
             await interaction.followup.send(content)
