@@ -48,7 +48,7 @@ class GameServer(commands.Cog, name="ゲームサーバー管理"):
             
             prompt = f"システム情報: 現在{len(servers)}個のゲームサーバーの状態を取得し表示しました。これから管理しているゲームサーバーの一覧とそれぞれ現在の詳細状況が表示されるということを、あなたの言葉で短く案内してください。"
             await generate_ai_response(prompt, self.config, reply_target=ctx)
-            await ctx.reply(embed=embed)
+            await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="gs_start", description="指定したサーバーを起動します。引数にサーバー名が必要です。")
     async def start_server(self, ctx, server_name: str = None):

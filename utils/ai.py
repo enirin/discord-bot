@@ -1,5 +1,40 @@
 import aiohttp
 
+
+async def _defer_interaction_if_needed(reply_target):
+    interaction = getattr(reply_target, 'interaction', None)
+    if interaction is None:
+        return
+
+    if interaction.response.is_done():
+        return
+
+    await interaction.response.defer(thinking=True)
+
+
+async def _send_discord_response(reply_target, content):
+    interaction = getattr(reply_target, 'interaction', None)
+    if interaction is not None:
+        if interaction.response.is_done():
+            await interaction.followup.send(content)
+        else:
+            await interaction.response.send_message(content)
+        return
+
+    if hasattr(reply_target, 'reply'):
+        await reply_target.reply(content)
+        return
+
+    if hasattr(reply_target, 'send'):
+        await reply_target.send(content)
+        return
+
+    if hasattr(reply_target, 'channel') and hasattr(reply_target.channel, 'send'):
+        await reply_target.channel.send(content)
+        return
+
+    raise TypeError("返信先のオブジェクトがDiscord送信に対応していません。")
+
 def _build_system_instruction(config):
     system_instruction = config.get('system_prompt', "You are a helpful assistant.")
     bot_name = config.get('bot_name', "Bot")
@@ -111,6 +146,8 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
         typing_manager = reply_target.typing()
 
     try:
+        await _defer_interaction_if_needed(reply_target)
+
         if typing_manager:
             async with typing_manager:
                 result = await generate_ai_text(
@@ -128,14 +165,17 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
             )
 
         if result.get("success"):
-            await reply_target.reply(result["response"])
+            await _send_discord_response(reply_target, result["response"])
             return result
 
         error_msg = result.get("error", "エラーが発生したため、お返事できません。")
-        await reply_target.reply(error_msg)
+        await _send_discord_response(reply_target, error_msg)
         return result
     except Exception as e:
         print(f"AI APIエラー: {e}")
         error_msg = f"エラーが発生したため、お返事できません。\n`{e}`"
-        await reply_target.reply(error_msg)
+        try:
+            await _send_discord_response(reply_target, error_msg)
+        except Exception:
+            pass
         return {"success": False, "error": str(e)}
