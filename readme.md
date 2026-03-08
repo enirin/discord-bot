@@ -65,6 +65,28 @@ Botが監視する特定のチャンネルIDを特定する手順です。
 git clone https://github.com/enirin/discord-bot.git  
 cd discord-bot
 
+### 会話履歴の要約圧縮について
+
+おしゃべり機能では、`conversation_history_limit` を超えた古い履歴を単純に捨てるのではなく、過去ログを要約した上で追加のsystemメッセージとして保持します。これにより、直近の発話はそのまま残しつつ、古い文脈もある程度引き継げます。
+
+`conversation_summary_keep_recent` は、要約せずにそのまま残す直近メッセージ件数です。小さすぎると直近の会話の細部が失われやすくなり、大きすぎると毎回の送信トークン量が増えて返信速度が低下します。
+
+複数人が参加するチャンネルでは、会話履歴に発言者名を含めてAIへ渡します。また、Botは全発言に毎回反応するのではなく、メンション・Botへの返信・Bot名の呼びかけ・優先キーワードをきっかけに会話へ入り、その後は一定時間だけ質問に追従しやすくなります。
+
+```yaml
+conversation_history_limit: 20
+
+# 会話履歴が上限を超えた際に、直近として保持するメッセージ件数
+# 古い会話は要約され、追加のsystemメッセージとして文脈に再利用されます
+conversation_summary_keep_recent: 8
+
+# Botが会話に呼び込まれた後、追従しやすい状態を維持する秒数
+conversation_session_timeout_seconds: 90
+
+# Botが連続で割り込みすぎないための、チャンネル単位の最小返信間隔（秒）
+conversation_reply_cooldown_seconds: 20
+```
+
 ### **2\. Python仮想環境の構築**
 本プログラムを実行するために必要な前提環境を整えます。
 
