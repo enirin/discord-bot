@@ -1,7 +1,6 @@
 import discord
 from discord.ext import commands
 import subprocess
-import yaml
 from utils.ai import generate_ai_response
 
 class System(commands.Cog, name="システム機能"):
@@ -35,6 +34,7 @@ class System(commands.Cog, name="システム機能"):
         await generate_ai_response(prompt, self.config, reply_target=ctx)
 
 async def setup(bot):
-    with open("config.yaml", "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = getattr(bot, "config", None)
+    if config is None:
+        raise RuntimeError("Bot config is not loaded. Please check startup configuration loading.")
     await bot.add_cog(System(bot, config))

@@ -1,9 +1,7 @@
 import discord
 from discord.ext import commands
-import yaml
 from utils.ai import generate_ai_response
 from utils.game_api import GameServerAPI
-from utils.ai import generate_ai_response
 
 class GameServer(commands.Cog, name="ゲームサーバー管理"):
     """ゲームサーバーの起動・停止・状態確認を行うコマンド群"""
@@ -112,6 +110,7 @@ class GameServer(commands.Cog, name="ゲームサーバー管理"):
         await generate_ai_response(prompt, self.config, reply_target=ctx)
 
 async def setup(bot):
-    with open("config.yaml", "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = getattr(bot, "config", None)
+    if config is None:
+        raise RuntimeError("Bot config is not loaded. Please check startup configuration loading.")
     await bot.add_cog(GameServer(bot, config))

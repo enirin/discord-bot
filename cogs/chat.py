@@ -1,7 +1,6 @@
 import discord
 from discord.ext import commands
 import time
-import yaml
 from utils.ai import generate_ai_response, generate_ai_text
 
 # チャンネルごとの会話履歴の最大保持件数（ユーザー発言＋AI返答の合計）
@@ -315,6 +314,7 @@ class Chat(commands.Cog):
             await message.reply(f"(おしゃべり機能履歴: {history_count}件 / {message.author})")
 
 async def setup(bot):
-    with open("config.yaml", "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    config = getattr(bot, "config", None)
+    if config is None:
+        raise RuntimeError("Bot config is not loaded. Please check startup configuration loading.")
     await bot.add_cog(Chat(bot, config))

@@ -3,10 +3,92 @@ from discord.ext import commands
 import yaml
 import os
 import asyncio
+import sys
+
+
+def load_config_or_exit(config_path="config.yaml"):
+    """config.yaml を読み込み、構文/必須項目エラー時は案内を表示して終了する。"""
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            loaded = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"設定ファイルが見つかりません: {config_path}")
+        print("config.yaml.sample をコピーして config.yaml を作成してください。")
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        print(f"config.yaml の構文エラーを検出しました: {e}")
+        mark = getattr(e, "problem_mark", None)
+        if mark is not None:
+            print(f"エラー位置: 行 {mark.line + 1}, 列 {mark.column + 1}")
+        print("Botは起動しません。config.yaml の記述を確認して再実行してください。")
+        sys.exit(1)
+
+    if not isinstance(loaded, dict):
+        print("config.yaml の形式が不正です。トップレベルはマッピング形式（key: value）にしてください。")
+        print("Botは起動しません。config.yaml を確認して再実行してください。")
+        sys.exit(1)
+
+    required_keys = ["bot_token", "channel_ids", "bot_name"]
+    missing = [key for key in required_keys if key not in loaded]
+    if missing:
+        print(f"config.yaml の必須項目が不足しています: {', '.join(missing)}")
+        print("Botは起動しません。config.yaml を確認して再実行してください。")
+        sys.exit(1)
+
+    if not isinstance(loaded.get("channel_ids"), list):
+        print("config.yaml の channel_ids は配列（- 123...）で指定してください。")
+        print("Botは起動しません。config.yaml を確認して再実行してください。")
+        sys.exit(1)
+
+    numeric_required_fields = [
+        "rate_limit_seconds",
+        "rate_limit_count",
+        "conversation_history_limit",
+        "conversation_summary_keep_recent",
+        "conversation_session_timeout_seconds",
+        "conversation_reply_cooldown_seconds",
+    ]
+    numeric_optional_fields = [
+        "guild_id",
+    ]
+
+    for channel_id in loaded.get("channel_ids", []):
+        if not isinstance(channel_id, int):
+            print(f"config.yaml の channel_ids に数値以外が含まれています: {channel_id}")
+            print("channel_ids は整数の配列で指定してください。")
+            print("Botは起動しません。config.yaml を確認して再実行してください。")
+            sys.exit(1)
+
+    invalid_required = [
+        key for key in numeric_required_fields
+        if key in loaded and not isinstance(loaded.get(key), int)
+    ]
+    if invalid_required:
+        print(
+            "config.yaml の数値項目に不正な型があります: "
+            f"{', '.join(invalid_required)}"
+        )
+        print("これらの項目は整数で指定してください。")
+        print("Botは起動しません。config.yaml を確認して再実行してください。")
+        sys.exit(1)
+
+    invalid_optional = [
+        key for key in numeric_optional_fields
+        if key in loaded and loaded.get(key) not in (None, "") and not isinstance(loaded.get(key), int)
+    ]
+    if invalid_optional:
+        print(
+            "config.yaml の数値項目に不正な型があります: "
+            f"{', '.join(invalid_optional)}"
+        )
+        print("これらの項目は未設定（空欄）または整数で指定してください。")
+        print("Botは起動しません。config.yaml を確認して再実行してください。")
+        sys.exit(1)
+
+    return loaded
 
 # --- 設定の読み込み ---
-with open("config.yaml", "r", encoding="utf-8") as f:
-    config = yaml.safe_load(f)
+config = load_config_or_exit("config.yaml")
 
 TOKEN = config['bot_token']
 TARGET_CHANNEL_IDS = config['channel_ids']
@@ -23,9 +105,10 @@ class MyHelp(commands.DefaultHelpCommand):
         self.command_attrs["help"] = "ヘルプを表示します。"
 
 class SMEBot(commands.Bot):
-    def __init__(self):
+    def __init__(self, config_data):
         intents = discord.Intents.default()
         intents.message_content = True
+        self.config = config_data
         # コマンドプレフィックスを / に設定
         super().__init__(command_prefix='!', intents=intents, help_command=MyHelp())
 
@@ -89,5 +172,5 @@ async def on_message(self, message):
         await self.process_commands(message)
 
 # 実行
-bot = SMEBot()
+bot = SMEBot(config)
 bot.run(TOKEN)
