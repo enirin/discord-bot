@@ -99,10 +99,11 @@ class WebEndpointServer:
         if channel_id is None:
             return web.json_response({"success": False, "error": "channel_id is required"}, status=400)
 
-        try:
-            channel_id = int(channel_id)
-        except (TypeError, ValueError):
-            return web.json_response({"success": False, "error": "channel_id must be integer"}, status=400)
+        if isinstance(channel_id, bool) or not isinstance(channel_id, int):
+            return web.json_response(
+                {"success": False, "error": "channel_id must be integer (JSON number)"},
+                status=400,
+            )
 
         channel, channel_error = await self._resolve_channel(channel_id)
         if channel_error is not None:
