@@ -41,6 +41,14 @@ conversation_session_timeout_seconds: 90
 # Botが連続で割り込みすぎないための、チャンネル単位の最小返信間隔（秒）
 conversation_reply_cooldown_seconds: 20
 
+# 外部のゲーム監視サーバーから Bot に通知するHTTPエンドポイント設定
+web_endpoint_host: "127.0.0.1"
+web_endpoint_port: 5050
+
+# 必要に応じてWEBエンドポイントの認証トークンを設定（ヘッダ X-Send-Token で送信）
+# 未設定の場合はトークン検証を行いません
+web_endpoint_token:
+
 game_api_url: "http://localhost:5000"
 
 # スラッシュコマンド（/コマンド）の予測変換をすぐに反映させたい場合は、

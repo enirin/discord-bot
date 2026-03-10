@@ -4,6 +4,7 @@ import yaml
 import os
 import asyncio
 import sys
+from utils.web_endpoint import WebEndpointServer
 
 
 def load_config_or_exit(config_path="config.yaml"):
@@ -50,6 +51,7 @@ def load_config_or_exit(config_path="config.yaml"):
     ]
     numeric_optional_fields = [
         "guild_id",
+        "web_endpoint_port",
     ]
 
     for channel_id in loaded.get("channel_ids", []):
@@ -109,11 +111,14 @@ class SMEBot(commands.Bot):
         intents = discord.Intents.default()
         intents.message_content = True
         self.config = config_data
+        self.web_endpoint_server = WebEndpointServer(self, self.config)
         # コマンドプレフィックスを / に設定
         super().__init__(command_prefix='!', intents=intents, help_command=MyHelp())
 
     async def setup_hook(self):
-        """起動時にCogsを読み込む"""
+        """起動時にCogsを読み込み、Webエンドポイントサーバーを起動する。"""
+        await self.web_endpoint_server.start()
+
         for filename in os.listdir('./cogs'):
             if filename.endswith('.py'):
                 await self.load_extension(f'cogs.{filename[:-3]}')
@@ -157,6 +162,10 @@ class SMEBot(commands.Bot):
                 print(f"アイコンの更新に失敗しました: {e}")
             """
             pass
+
+    async def close(self):
+        await self.web_endpoint_server.stop()
+        await super().close()
 
 async def on_message(self, message):
         # 1. 自分自身と他のBotを無視

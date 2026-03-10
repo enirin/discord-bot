@@ -154,6 +154,18 @@ ollama pull pakachan/elyza-llama3-8b
 
 サーバーに参加させたBotの名前がログイン状態になっていたら、監視が成功しています。
 
+### 外部監視サーバーからの通知 (`/tell`)
+
+Bot起動中は `POST /tell` エンドポイントを受け付けます。ゲーム監視サーバーなどから `prompt` を送ると、BotがAI応答を生成して指定チャンネルへ投稿します。
+
+```bash
+curl -X POST "http://127.0.0.1:5050/tell" \
+   -H "Content-Type: application/json" \
+   -d '{"prompt":"システム情報: 監視サーバーからの通知です。現在CPU使用率が高めです。ユーザーへ案内してください。"}'
+```
+
+`channel_id` をJSONに含めると送信先を指定できます。`web_endpoint_token` を設定した場合は `X-Send-Token` ヘッダで同じ値を送ってください。
+
 ### 💡 「時短テクニック」
 毎回端末の起動時に`source ...` と打つのが面倒な場合、実は以下のコマンドで**「仮想環境の中にあるPython」を直接指定して**１行で実行することもできます。
 
