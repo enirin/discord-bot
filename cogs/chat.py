@@ -60,7 +60,7 @@ class Chat(commands.Cog):
         }
 
     async def _add_to_conversation(self, channel_id, record):
-        """履歴にメッセージを追加し、上限を超えたら要約（圧縮）する"""
+        """会話履歴にメッセージを追加し、必要に応じて古い履歴を要約に圧縮する"""
         history = self._get_conversation(channel_id)
         history.append(record)
         if len(history) > self.history_limit:
@@ -70,7 +70,8 @@ class Chat(commands.Cog):
         """AIへ渡すための単一メッセージフォーマット"""
         role = record.get("role")
         content = str(record.get("content", "")).strip()
-        if not content: return None
+        if not content: 
+            return None
         if role == "assistant":
             return {"role": "assistant", "content": content}
         speaker = record.get("display_name") or record.get("author_name") or "ユーザー"
