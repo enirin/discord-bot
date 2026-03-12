@@ -87,7 +87,7 @@ def _build_messages(prompt_text, config, conversation_history=None, extra_system
     ]
 
 
-async def _request_ollama(config, messages):
+async def _request_ollama(config, messages, tools=None):
     target_model = config.get('ai_model', "llama3.2")
     ollama_url = config.get('ollama_url', "http://localhost:11434/api/chat")
 
@@ -96,6 +96,8 @@ async def _request_ollama(config, messages):
         "messages": messages,
         "stream": False
     }
+    if tools:
+        payload["tools"] = tools
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -103,8 +105,9 @@ async def _request_ollama(config, messages):
                 if resp.status == 200:
                     data = await resp.json()
                     message_obj = data.get("message", {})
-                    response_text = message_obj.get("content", "ごめんなさい、うまく考えられませんでした。")
-                    return {"success": True, "response": response_text}
+                    response_text = message_obj.get("content", "")
+                    tool_calls = message_obj.get("tool_calls", [])
+                    return {"success": True, "response": response_text, "tool_calls": tool_calls}
 
                 error_msg = f"AIサーバーエラー (ステータス: {resp.status})"
                 return {"success": False, "error": error_msg}
@@ -113,7 +116,7 @@ async def _request_ollama(config, messages):
         return {"success": False, "error": str(e)}
 
 
-async def generate_ai_text(prompt_text, config, conversation_history=None, extra_system_messages=None, prompt_role=None, include_base_system_instruction=True):
+async def generate_ai_text(prompt_text, config, conversation_history=None, extra_system_messages=None, prompt_role=None, include_base_system_instruction=True, tools=None):
     messages = _build_messages(
         prompt_text,
         config,
@@ -122,10 +125,10 @@ async def generate_ai_text(prompt_text, config, conversation_history=None, extra
         prompt_role=prompt_role,
         include_base_system_instruction=include_base_system_instruction,
     )
-    return await _request_ollama(config, messages)
+    return await _request_ollama(config, messages, tools=tools)
 
 
-async def generate_ai_response(target_message_or_text, config, reply_target=None, conversation_history=None, extra_system_messages=None):
+async def generate_ai_response(target_message_or_text, config, reply_target=None, conversation_history=None, extra_system_messages=None, tools=None, tool_dispatcher=None):
     """
     Ollama APIを利用してAIの返信を生成し、Discordに送信する汎用関数。
 
@@ -137,6 +140,8 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
         conversation_history: 会話履歴リスト [{"role": "user"/"assistant", "content": "..."}]
                               Noneの場合は単発リクエスト（コマンド系）として扱う。
         extra_system_messages: system_instruction とは別に付与する追加の system メッセージ配列。
+        tools: Ollamaに渡すツールの定義リスト。
+        tool_dispatcher: ツール呼び出しを処理し、結果の文字列を返す非同期コールバック関数 (tool_call) -> str
     """
 
     # プロンプトの抽出と返信先の決定
@@ -160,24 +165,77 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
     try:
         await _defer_interaction_if_needed(reply_target)
 
-        if typing_manager:
-            async with typing_manager:
+        # ツール呼び出しのループ処理用履歴
+        current_history = list(conversation_history) if conversation_history else []
+        current_prompt = prompt_text
+        prompt_role = "user"
+        
+        # 最大5回ループしてツールを解決する
+        for _ in range(5):
+            if typing_manager:
+                async with typing_manager:
+                    result = await generate_ai_text(
+                        current_prompt,
+                        config,
+                        conversation_history=current_history,
+                        extra_system_messages=extra_system_messages,
+                        prompt_role=prompt_role,
+                        tools=tools,
+                    )
+            else:
                 result = await generate_ai_text(
-                    prompt_text,
+                    current_prompt,
                     config,
-                    conversation_history=conversation_history,
+                    conversation_history=current_history,
                     extra_system_messages=extra_system_messages,
+                    prompt_role=prompt_role,
+                    tools=tools,
                 )
-        else:
-            result = await generate_ai_text(
-                prompt_text,
-                config,
-                conversation_history=conversation_history,
-                extra_system_messages=extra_system_messages,
-            )
 
+            if not result.get("success"):
+                break
+
+            tool_calls = result.get("tool_calls", [])
+            response_text = result.get("response", "")
+
+            # ツール呼び出しがない場合はループ終了して返信
+            if not tool_calls or tool_dispatcher is None:
+                if not response_text:
+                    response_text = "ごめんなさい、うまく考えられませんでした。"
+                await _send_discord_response(reply_target, response_text)
+                result["response"] = response_text
+                return result
+
+            # ツール呼び出しがある場合
+            # アシスタントの返答（tool_calls含む）を履歴に追加
+            current_history.append({
+                "role": "user", "content": current_prompt
+            })
+            assistant_message = {"role": "assistant", "content": response_text}
+            if tool_calls:
+                assistant_message["tool_calls"] = tool_calls
+            current_history.append(assistant_message)
+            
+            # 各ツールを実行し、その結果をプロンプトとして追加する（Ollamaフォーマットに準拠して role: tool とする）
+            tool_results_texts = []
+            for tool_call in tool_calls:
+                tool_res = await tool_dispatcher(tool_call)
+                # Ollamaのtool応答仕様に合わせる
+                current_history.append({
+                    "role": "tool",
+                    "content": tool_res,
+                })
+            
+            # 次のプロンプトを空文字または特定の内容にして再リクエスト
+            current_prompt = ""
+            # role が user でないとエラーになるか、履歴だけで継続できるか依存するため、
+            # historyの末尾にtool応答が追加されたので、改めて空のプロンプト（role: user）で要求する。
+            prompt_role = "user"
+        
+        # ループを抜けてしまった場合（エラー含む）
         if result.get("success"):
-            await _send_discord_response(reply_target, result["response"])
+            response_text = result.get("response", "ツール呼び出しの処理が上限に達しました。")
+            await _send_discord_response(reply_target, response_text)
             return result
 
         error_msg = result.get("error", "エラーが発生したため、お返事できません。")
