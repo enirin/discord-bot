@@ -305,9 +305,30 @@ class Chat(commands.Cog):
             conversation_history=ai_history,
             extra_system_messages=[self._get_summary_message(channel_id)],
         )
+        
         if result.get("success"):
+            ai_response = result["response"]
+            
+            # --- ここから追加：コマンド解析ロジック ---
+            if "[COMMAND:" in ai_response:
+                # [COMMAND:START:valheim-production] のような文字列を探す
+                import re
+                match = re.search(r"\[COMMAND:(START|STOP):(.+?)\]", ai_response)
+                if match:
+                    action = match.group(1)   # START or STOP
+                    server_id = match.group(2) # valheim-production
+                    
+                    # GameServer Cog を取得して、既存の API 連携機能を呼び出す
+                    game_cog = self.bot.get_cog("ゲームサーバー管理")
+                    if game_cog:
+                        if action == "START":
+                            await game_cog.api.start_server(server_id)
+                        elif action == "STOP":
+                            await game_cog.api.stop_server(server_id)
+            # --- ここまで追加 ---
+
             self._mark_bot_replied(channel_id)
-            await self._add_to_conversation(channel_id, self._create_assistant_record(result["response"]))
+            await self._add_to_conversation(channel_id, self._create_assistant_record(ai_response))
         else:
             user_id = message.author.id
             history_count = len(self.user_history.get(user_id, []))

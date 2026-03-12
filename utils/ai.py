@@ -53,6 +53,12 @@ def _build_system_instruction(config):
     system_instruction += (
         f"\nあなたの名前は「{bot_name}」です。"
         f"ユーザーから名前の一部であったり、愛称（ちゃん付けなど）で呼ばれた場合でも、自分自身の名前として認識して自然に返答してください。"
+        "\n【重要：サーバー操作権限】"
+        "\nあなたはゲームサーバーの管理権限を持っています。ユーザーから「起動して」「止めて」と頼まれたら、"
+        "\n返答の末尾に必ず以下の形式でコマンドを追記してください。"
+        "\n・起動依頼： [COMMAND:START:サーバー名]"
+        "\n・停止依頼： [COMMAND:STOP:サーバー名]"
+        "\n現在の対象サーバー名は「valheim-production」です。"
     )
     return system_instruction
 
