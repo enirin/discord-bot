@@ -16,12 +16,19 @@ class Chat(commands.Cog):
     def __init__(self, bot, config):
         self.bot = bot
         self.config = config
+        # ユーザーごとの発言時間を記録する辞書 {user_id: [timestamp, timestamp, ...]}
         self.user_history = {}
+        # コンフィグから優先キーワードを取得（なければ空リスト）
         self.priority_keywords = self.config.get('priority_keywords', [])
+        # チャンネルごとの会話履歴 {channel_id: [{"role": "user"/"assistant", "content": "..."}, ...]}
         self.channel_conversations = {}
+        # チャンネルごとの要約済み会話
         self.channel_summaries = {}
+        # チャンネルごとのBot会話セッション期限
         self.channel_active_until = {}
+        # チャンネルごとの最終Bot返信時刻
         self.channel_last_bot_reply_at = {}
+        # 会話履歴の最大保持件数
         
         # コンフィグから設定を取得（なければデフォルト値を使用）
         self.history_limit = self.config.get('conversation_history_limit', DEFAULT_HISTORY_LIMIT)
