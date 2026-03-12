@@ -87,7 +87,7 @@ class Chat(commands.Cog):
         return formatted_history
 
     def _get_latest_user_prompt(self, record):
-        """最新のユーザー発言を名前付きで整形（これが不足していた関数です）"""
+        """最新のユーザー発言を名前付きで整形"""
         speaker_name = record.get("display_name") or record.get("author_name") or "ユーザー"
         content = str(record.get("content", "")).strip()
         return f"{speaker_name}: {content}"
@@ -177,21 +177,30 @@ class Chat(commands.Cog):
         if game_cog:
             res = await game_cog.api.list_servers()
             if res.get("success") or "servers" in res:
-                server_knowledge = "【現在のゲームサーバー最新状況】\n"
+                server_knowledge = "【最新：現在のリアルタイム事実】\n"
                 for s in res.get("servers", []):
-                    players = ", ".join(s.get("players_list", [])) or "なし"
+                    # プレイヤーリストを明示的に整形
+                    p_list = s.get("players_list", [])
+                    player_names = ", ".join(p_list) if p_list else "現在、オンライン中のプレイヤーはいません（0人）"
+                    
                     server_knowledge += (
                         f"- サーバー名: {s['name']}\n"
-                        f"  状態: {s['status']}\n"
-                        f"  人数: {s['stats']['players']}\n"
-                        f"  オンライン中: {players}\n"
-                        f"  経過日数: {s.get('day', 0)}日目\n"
+                        f"  稼働状態: {s['status']}\n"
+                        f"  現在の人数: {s['stats']['players']}\n"
+                        f"  実際にログインしているプレイヤー名: {player_names}\n"
+                        f"  ゲーム内経過日数: {s.get('day', 0)}日目\n"
                     )
 
         # AIへのプロンプト構成
         extra_sys = [self._get_summary_message(channel_id)]
         if server_knowledge:
-            extra_sys.append(f"あなたは現在、サーバーについて以下の事実を知っています。質問にはこの情報を元に答えてください。\n{server_knowledge}")
+            # 過去の会話よりも最新のステータスを絶対的な真実として扱うよう指示
+            extra_sys.append(
+                "あなたは現在、サーバーから最新の内部ログデータを受け取っています。"
+                "過去の会話で誰かがログインしたという記録があっても、以下の事実に「いない」と書かれていれば、そのプレイヤーはすでにログアウトしています。"
+                "回答する際は、会話履歴との矛盾があっても、常に以下の最新データを『絶対的な真実』として回答してください。\n"
+                f"{server_knowledge}"
+            )
 
         ai_history = self._get_ai_history(channel_id, self._get_conversation(channel_id)[:-1])
         prompt_text = self._get_latest_user_prompt(user_record)
@@ -215,4 +224,5 @@ class Chat(commands.Cog):
             await self._add_to_conversation(channel_id, self._create_assistant_record(ai_resp))
 
 async def setup(bot):
-    await bot.add_cog(Chat(bot, bot.config))
+    config = getattr(bot, "config", None)
+    await bot.add_cog(Chat(bot, config))
