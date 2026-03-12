@@ -58,7 +58,7 @@ def _build_system_instruction(config):
         "\n返答の末尾に必ず以下の形式でコマンドを追記してください。"
         "\n・起動依頼： [COMMAND:START:サーバー名]"
         "\n・停止依頼： [COMMAND:STOP:サーバー名]"
-        "\n現在の対象サーバー名は「valheim-production」です。"
+        "\n現在の対象サーバー名は「{server_id}」です。"
     )
     return system_instruction
 
