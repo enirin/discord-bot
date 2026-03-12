@@ -1,31 +1,29 @@
 import discord
 from discord.ext import commands
 import time
+import re
 from utils.ai import generate_ai_response, generate_ai_text
 
-# チャンネルごとの会話履歴の最大保持件数（ユーザー発言＋AI返答の合計）
+# デフォルト設定値
 DEFAULT_HISTORY_LIMIT = 20
 DEFAULT_SUMMARY_KEEP_RECENT = 8
 DEFAULT_SESSION_TIMEOUT_SECONDS = 90
 DEFAULT_REPLY_COOLDOWN_SECONDS = 20
 
 class Chat(commands.Cog):
+    """AIとの対話、会話履歴の管理、および自然言語によるサーバー操作を制御するモジュール"""
+
     def __init__(self, bot, config):
         self.bot = bot
         self.config = config
-        # ユーザーごとの発言時間を記録する辞書 {user_id: [timestamp, timestamp, ...]}
         self.user_history = {}
-        # コンフィグから優先キーワードを取得（なければ空リスト）
         self.priority_keywords = self.config.get('priority_keywords', [])
-        # チャンネルごとの会話履歴 {channel_id: [{"role": "user"/"assistant", "content": "..."}, ...]}
         self.channel_conversations = {}
-        # チャンネルごとの要約済み会話
         self.channel_summaries = {}
-        # チャンネルごとのBot会話セッション期限
         self.channel_active_until = {}
-        # チャンネルごとの最終Bot返信時刻
         self.channel_last_bot_reply_at = {}
-        # 会話履歴の最大保持件数
+        
+        # コンフィグから設定を取得（なければデフォルト値を使用）
         self.history_limit = self.config.get('conversation_history_limit', DEFAULT_HISTORY_LIMIT)
         configured_keep_recent = self.config.get('conversation_summary_keep_recent', DEFAULT_SUMMARY_KEEP_RECENT)
         self.summary_keep_recent = max(1, min(configured_keep_recent, self.history_limit))
@@ -33,12 +31,13 @@ class Chat(commands.Cog):
         self.reply_cooldown_seconds = self.config.get('conversation_reply_cooldown_seconds', DEFAULT_REPLY_COOLDOWN_SECONDS)
 
     def _get_conversation(self, channel_id):
-        """チャンネルの会話履歴を取得する（なければ初期化）"""
+        """チャンネルの会話履歴を取得（初期化）"""
         if channel_id not in self.channel_conversations:
             self.channel_conversations[channel_id] = []
         return self.channel_conversations[channel_id]
 
     def _create_user_record(self, message):
+        """ユーザーの発言を履歴用レコードに変換"""
         return {
             "role": "user",
             "content": message.content,
@@ -50,6 +49,7 @@ class Chat(commands.Cog):
         }
 
     def _create_assistant_record(self, content):
+        """AIの返答を履歴用レコードに変換"""
         return {
             "role": "assistant",
             "content": content,
@@ -60,26 +60,24 @@ class Chat(commands.Cog):
         }
 
     async def _add_to_conversation(self, channel_id, record):
-        """会話履歴にメッセージを追加し、必要に応じて古い履歴を要約に圧縮する"""
+        """履歴にメッセージを追加し、上限を超えたら要約（圧縮）する"""
         history = self._get_conversation(channel_id)
         history.append(record)
-
         if len(history) > self.history_limit:
             await self._compress_conversation(channel_id)
 
     def _format_history_record_for_ai(self, record):
+        """AIへ渡すための単一メッセージフォーマット"""
         role = record.get("role")
         content = str(record.get("content", "")).strip()
-        if not content:
-            return None
-
+        if not content: return None
         if role == "assistant":
             return {"role": "assistant", "content": content}
-
-        speaker_name = record.get("display_name") or record.get("author_name") or "ユーザー"
-        return {"role": "user", "content": f"{speaker_name}: {content}"}
+        speaker = record.get("display_name") or record.get("author_name") or "ユーザー"
+        return {"role": "user", "content": f"{speaker}: {content}"}
 
     def _get_ai_history(self, channel_id, history=None):
+        """AIへ渡すための会話履歴リストを作成"""
         source_history = history if history is not None else self._get_conversation(channel_id)
         formatted_history = []
         for record in source_history:
@@ -89,253 +87,132 @@ class Chat(commands.Cog):
         return formatted_history
 
     def _get_latest_user_prompt(self, record):
+        """最新のユーザー発言を名前付きで整形（これが不足していた関数です）"""
         speaker_name = record.get("display_name") or record.get("author_name") or "ユーザー"
         content = str(record.get("content", "")).strip()
         return f"{speaker_name}: {content}"
 
     def _looks_like_question(self, content):
+        """メッセージが質問形式か判定"""
         lowered = content.lower()
         question_markers = ["?", "？", "教えて", "おしえて", "わからない", "なに", "何", "どう", "なんで", "なぜ", "かな", "でしょうか"]
         return any(marker in lowered for marker in question_markers)
 
     async def _is_reply_to_bot(self, message):
+        """Botへの返信かどうか判定"""
         reference = message.reference
-        if reference is None:
-            return False
-
+        if reference is None: return False
         resolved = reference.resolved
         if resolved is not None and hasattr(resolved, 'author'):
             return resolved.author == self.bot.user
-
-        if reference.message_id is None:
-            return False
-
-        try:
-            referenced_message = await message.channel.fetch_message(reference.message_id)
-        except Exception:
-            return False
-
-        return referenced_message.author == self.bot.user
-
-    async def _should_respond(self, message, channel_id, is_priority):
-        now = time.time()
-        bot_name = str(self.config.get('bot_name', '')).strip().lower()
-        content_lower = message.content.lower()
-        is_mentioned = self.bot.user in message.mentions if self.bot.user else False
-        is_name_called = bool(bot_name) and bot_name in content_lower
-        is_reply_to_bot = await self._is_reply_to_bot(message)
-        in_active_session = now < self.channel_active_until.get(channel_id, 0)
-        on_cooldown = now - self.channel_last_bot_reply_at.get(channel_id, 0) < self.reply_cooldown_seconds
-        is_question = self._looks_like_question(message.content)
-
-        if is_priority:
-            self.channel_active_until[channel_id] = now + self.session_timeout_seconds
-            return True, "priority", True
-
-        if is_mentioned:
-            self.channel_active_until[channel_id] = now + self.session_timeout_seconds
-            return True, "mention", True
-
-        if is_reply_to_bot:
-            self.channel_active_until[channel_id] = now + self.session_timeout_seconds
-            return True, "reply_to_bot", True
-
-        if is_name_called:
-            self.channel_active_until[channel_id] = now + self.session_timeout_seconds
-            return True, "name_called", True
-
-        if in_active_session and is_question and not on_cooldown:
-            return True, "active_session_question", False
-
-        return False, "observe_only", False
+        return False
 
     def _mark_bot_replied(self, channel_id):
+        """返信時刻とセッション期限を更新"""
         now = time.time()
         self.channel_last_bot_reply_at[channel_id] = now
         self.channel_active_until[channel_id] = now + self.session_timeout_seconds
 
     def _get_summary_message(self, channel_id):
+        """要約メッセージを取得"""
         summary_text = self.channel_summaries.get(channel_id, "").strip()
-        if not summary_text:
-            return None
-
-        return (
-            "以下はこのチャンネルでそれ以前に交わされた会話の要約です。"
-            "現在の会話の文脈として必要な範囲で参照してください。\n"
-            f"{summary_text}"
-        )
+        if not summary_text: return None
+        return f"以前の会話の要約:\n{summary_text}"
 
     async def _compress_conversation(self, channel_id):
+        """会話履歴をAIで要約して圧縮"""
         history = self._get_conversation(channel_id)
         summarize_count = len(history) - self.summary_keep_recent
-        if summarize_count <= 0:
-            summarize_count = len(history) - self.history_limit
-        if summarize_count <= 0:
-            return
-
-        print(
-            f"Starting conversation compression for channel {channel_id}: "
-            f"history_count={len(history)}, summarize_count={summarize_count}, "
-            f"keep_recent={self.summary_keep_recent}"
-        )
+        if summarize_count <= 0: return
 
         messages_to_summarize = history[:summarize_count]
-        existing_summary = self.channel_summaries.get(channel_id, "")
+        transcript = "\n".join([
+            f"{'ユーザー' if m['role']=='user' else 'アシスタント'}({m.get('display_name','Bot')}): {m['content']}"
+            for m in messages_to_summarize
+        ])
 
-        transcript_lines = []
-        for msg in messages_to_summarize:
-            if not isinstance(msg, dict):
-                continue
-
-            role = "ユーザー" if msg.get("role") == "user" else "アシスタント"
-            speaker_name = msg.get("display_name") or msg.get("author_name") or role
-            content = str(msg.get("content", "")).strip()
-            if content:
-                transcript_lines.append(f"{role}({speaker_name}): {content}")
-
-        if not transcript_lines:
-            del history[:summarize_count]
-            return
-
-        prompt = (
-            "以下の会話ログを、今後の応答に必要な文脈メモとして日本語で簡潔に要約してください。"
-            "重要な事実、依頼内容、未解決事項、話題の流れを優先し、雑談の細部や言い回しは削ってください。"
-            "誰が何を言ったか、誰に向けた質問や依頼かが分かる形を優先してください。"
-            "出力は200〜400文字程度、箇条書きではなく1つの自然な文章で返してください。"
-        )
-        if existing_summary:
-            prompt += f"\n\n既存の要約:\n{existing_summary}"
-        prompt += "\n\n今回新たに要約へ取り込む会話ログ:\n" + "\n".join(transcript_lines)
-
-        result = await generate_ai_text(
-            prompt,
-            self.config,
-            extra_system_messages=[
-                "あなたは会話履歴を圧縮して保持する要約器です。"
-                "人格の演技はせず、事実関係を保った要約だけを返してください。"
-                "推測や創作はせず、会話にない情報を足さないでください。"
-            ],
-            prompt_role="system",
-            include_base_system_instruction=False,
-        )
-
+        prompt = f"以下の会話の流れを日本語で簡潔に要約してください。\n\n{transcript}"
+        result = await generate_ai_text(prompt, self.config, prompt_role="system", include_base_system_instruction=False)
         if result.get("success"):
-            print(f"Generated conversation summary for channel {channel_id}: {result['response']}")
             self.channel_summaries[channel_id] = result["response"].strip()
             del history[:summarize_count]
-            return
-
-        print(f"Conversation summary failed for channel {channel_id}: {result.get('error')}")
-        overflow = len(history) - self.history_limit
-        if overflow > 0:
-            del history[:overflow]
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        # 1. 自分自身の投稿は無視
-        if message.author == self.bot.user:
-            return
-
-        # 2. 監視対象のチャンネル以外は無視
-        if message.channel.id not in self.config['channel_ids']:
-            return
-
-        # 3. コマンド（!から始まる）の場合は処理しない
-        if message.content.startswith(self.bot.command_prefix):
-            return
+        if message.author == self.bot.user or message.channel.id not in self.config['channel_ids']: return
+        if message.content.startswith(self.bot.command_prefix): return
 
         channel_id = message.channel.id
         user_record = self._create_user_record(message)
         await self._add_to_conversation(channel_id, user_record)
 
-        # --- 優先キーワードの判定 (レートリミット回避) ---
+        # 反応判定
+        bot_name = str(self.config.get('bot_name', '')).lower()
         is_priority = any(kw in message.content for kw in self.priority_keywords)
-        should_respond, reason, bypass_rate_limit = await self._should_respond(message, channel_id, is_priority)
-
-        print(
-            f"Chat response decision channel={channel_id} author={message.author} "
-            f"respond={should_respond} reason={reason}"
-        )
-
-        if not should_respond:
-            return
-
-        history = self._get_conversation(channel_id)
-        ai_history = self._get_ai_history(channel_id, history[:-1])
-        prompt_text = self._get_latest_user_prompt(user_record)
-
-        if is_priority:
-            result = await generate_ai_response(
-                prompt_text,
-                self.config,
-                reply_target=message,
-                conversation_history=ai_history,
-                extra_system_messages=[self._get_summary_message(channel_id)],
-            )
-            if result.get("success"):
-                self._mark_bot_replied(channel_id)
-                await self._add_to_conversation(channel_id, self._create_assistant_record(result["response"]))
-            else:
-                await message.reply("(優先キーワードでの応答に失敗しました)")
-            return
-
-        # --- レートリミットの判定 ---
-        user_id = message.author.id
+        is_mentioned = self.bot.user in message.mentions
+        is_name_called = bot_name in message.content.lower()
+        is_reply_to_bot = await self._is_reply_to_bot(message)
+        
         now = time.time()
-        limit_sec = self.config.get('rate_limit_seconds', 30)
-        limit_count = self.config.get('rate_limit_count', 3)
+        in_active_session = now < self.channel_active_until.get(channel_id, 0)
+        is_question = self._looks_like_question(message.content)
+        on_cooldown = now - self.channel_last_bot_reply_at.get(channel_id, 0) < self.reply_cooldown_seconds
 
-        if not bypass_rate_limit:
-            if user_id not in self.user_history:
-                self.user_history[user_id] = []
+        # いずれかの条件を満たせば応答
+        should_respond = is_priority or is_mentioned or is_name_called or is_reply_to_bot or (in_active_session and is_question and not on_cooldown)
+        if not should_respond: return
 
+        # レートリミット（優先時は無視）
+        if not is_priority:
+            user_id = message.author.id
+            limit_sec, limit_count = self.config.get('rate_limit_seconds', 30), self.config.get('rate_limit_count', 3)
+            if user_id not in self.user_history: self.user_history[user_id] = []
             self.user_history[user_id] = [t for t in self.user_history[user_id] if now - t < limit_sec]
-
-            if len(self.user_history[user_id]) >= limit_count:
-                print(f"Rate limit exceeded for {message.author}")
-                return
-
+            if len(self.user_history[user_id]) >= limit_count: return
             self.user_history[user_id].append(now)
 
-        # --- AIへのリクエスト（会話履歴付き）---
+        # --- 最新のサーバー知識を取得してAIに教える ---
+        game_cog = self.bot.get_cog("ゲームサーバー管理")
+        server_knowledge = ""
+        if game_cog:
+            res = await game_cog.api.list_servers()
+            if res.get("success") or "servers" in res:
+                server_knowledge = "【現在のゲームサーバー最新状況】\n"
+                for s in res.get("servers", []):
+                    players = ", ".join(s.get("players_list", [])) or "なし"
+                    server_knowledge += (
+                        f"- サーバー名: {s['name']}\n"
+                        f"  状態: {s['status']}\n"
+                        f"  人数: {s['stats']['players']}\n"
+                        f"  オンライン中: {players}\n"
+                        f"  経過日数: {s.get('day', 0)}日目\n"
+                    )
+
+        # AIへのプロンプト構成
+        extra_sys = [self._get_summary_message(channel_id)]
+        if server_knowledge:
+            extra_sys.append(f"あなたは現在、サーバーについて以下の事実を知っています。質問にはこの情報を元に答えてください。\n{server_knowledge}")
+
+        ai_history = self._get_ai_history(channel_id, self._get_conversation(channel_id)[:-1])
+        prompt_text = self._get_latest_user_prompt(user_record)
+
         result = await generate_ai_response(
-            prompt_text,
-            self.config,
-            reply_target=message,
-            conversation_history=ai_history,
-            extra_system_messages=[self._get_summary_message(channel_id)],
+            prompt_text, self.config, reply_target=message,
+            conversation_history=ai_history, extra_system_messages=extra_sys
         )
-        
+
         if result.get("success"):
-            ai_response = result["response"]
-            
-            # --- ここから追加：コマンド解析ロジック ---
-            if "[COMMAND:" in ai_response:
-                # [COMMAND:START:valheim-production] のような文字列を探す
-                import re
-                match = re.search(r"\[COMMAND:(START|STOP):(.+?)\]", ai_response)
-                if match:
-                    action = match.group(1)   # START or STOP
-                    server_id = match.group(2) # valheim-production
-                    
-                    # GameServer Cog を取得して、既存の API 連携機能を呼び出す
-                    game_cog = self.bot.get_cog("ゲームサーバー管理")
-                    if game_cog:
-                        if action == "START":
-                            await game_cog.api.start_server(server_id)
-                        elif action == "STOP":
-                            await game_cog.api.stop_server(server_id)
-            # --- ここまで追加 ---
+            ai_resp = result["response"]
+            # コマンド解析
+            if "[COMMAND:" in ai_resp:
+                match = re.search(r"\[COMMAND:(START|STOP):(.+?)\]", ai_resp)
+                if match and game_cog:
+                    action, sid = match.group(1), match.group(2).strip()
+                    if action == "START": await game_cog.api.start_server(sid)
+                    elif action == "STOP": await game_cog.api.stop_server(sid)
 
             self._mark_bot_replied(channel_id)
-            await self._add_to_conversation(channel_id, self._create_assistant_record(ai_response))
-        else:
-            user_id = message.author.id
-            history_count = len(self.user_history.get(user_id, []))
-            await message.reply(f"(おしゃべり機能履歴: {history_count}件 / {message.author})")
+            await self._add_to_conversation(channel_id, self._create_assistant_record(ai_resp))
 
 async def setup(bot):
-    config = getattr(bot, "config", None)
-    if config is None:
-        raise RuntimeError("Bot config is not loaded. Please check startup configuration loading.")
-    await bot.add_cog(Chat(bot, config))
+    await bot.add_cog(Chat(bot, bot.config))
