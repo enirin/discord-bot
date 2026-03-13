@@ -19,6 +19,7 @@
     "servers": \[  
       {  
         "name": "7dtd-server-01",  
+        "server_aliases": ["7d2d", "7days", "7dtd"],  
         "status": "online",  
         "address": "192.168.1.10",  
         "stats": {  
@@ -70,6 +71,7 @@
 | フィールド | 型 | 説明 |
 | :---- | :---- | :---- |
 | name | string | サーバーの識別名 |
+| server_aliases | array[string] | このサーバーを自然言語から特定するための別名一覧 |
 | status | string | online, offline, busy のいずれか |
 | address | string | 接続用IPアドレス |
 | day | integer | ゲーム内の経過日数 |

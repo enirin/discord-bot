@@ -1,6 +1,7 @@
-import aiohttp
 import discord
 from discord.ext import commands
+
+from infrastructure.clients.ollama_chat_client import OllamaChatClient
 
 
 def _extract_interaction(reply_target):
@@ -47,6 +48,27 @@ async def _send_discord_response(reply_target, content):
 
     raise TypeError("返信先のオブジェクトがDiscord送信に対応していません。")
 
+
+async def _send_discord_embed(reply_target, embed):
+    interaction = _extract_interaction(reply_target)
+    if interaction is not None:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed)
+        else:
+            await interaction.response.send_message(embed=embed)
+        return
+
+    if hasattr(reply_target, 'send'):
+        await reply_target.send(embed=embed)
+        return
+
+    if hasattr(reply_target, 'channel') and hasattr(reply_target.channel, 'send'):
+        await reply_target.channel.send(embed=embed)
+        return
+
+    raise TypeError("返信先のオブジェクトがDiscord埋め込み送信に対応していません。")
+
+
 def _build_system_instruction(config):
     system_instruction = config.get('system_prompt', "You are a helpful assistant.")
     bot_name = config.get('bot_name', "Bot")
@@ -68,7 +90,6 @@ def _build_messages(prompt_text, config, conversation_history=None, extra_system
     else:
         history_messages = []
         if prompt_role is None:
-            # 単発呼び出しは、ユーザー発話ではなくシステム通知の代理入力として扱う
             prompt_role = "system"
 
     system_messages = []
@@ -87,32 +108,6 @@ def _build_messages(prompt_text, config, conversation_history=None, extra_system
     ]
 
 
-async def _request_ollama(config, messages):
-    target_model = config.get('ai_model', "llama3.2")
-    ollama_url = config.get('ollama_url', "http://localhost:11434/api/chat")
-
-    payload = {
-        "model": target_model,
-        "messages": messages,
-        "stream": False
-    }
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(ollama_url, json=payload) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    message_obj = data.get("message", {})
-                    response_text = message_obj.get("content", "ごめんなさい、うまく考えられませんでした。")
-                    return {"success": True, "response": response_text}
-
-                error_msg = f"AIサーバーエラー (ステータス: {resp.status})"
-                return {"success": False, "error": error_msg}
-    except Exception as e:
-        print(f"AI APIエラー: {e}")
-        return {"success": False, "error": str(e)}
-
-
 async def generate_ai_text(prompt_text, config, conversation_history=None, extra_system_messages=None, prompt_role=None, include_base_system_instruction=True):
     messages = _build_messages(
         prompt_text,
@@ -122,24 +117,11 @@ async def generate_ai_text(prompt_text, config, conversation_history=None, extra
         prompt_role=prompt_role,
         include_base_system_instruction=include_base_system_instruction,
     )
-    return await _request_ollama(config, messages)
+    client = OllamaChatClient(config)
+    return await client.request_chat(messages)
 
 
 async def generate_ai_response(target_message_or_text, config, reply_target=None, conversation_history=None, extra_system_messages=None):
-    """
-    Ollama APIを利用してAIの返信を生成し、Discordに送信する汎用関数。
-
-    Args:
-        target_message_or_text: AIのプロンプトとなる文字列、またはDiscordのMessageオブジェクト
-        config: Botの設定情報辞書 (システムプロンプトやモデル名を取得)
-        reply_target: 返信先となるDiscordのMessageオブジェクトやContextオブジェクト。
-                      target_message_or_text がMessageオブジェクトの場合は省略可能。
-        conversation_history: 会話履歴リスト [{"role": "user"/"assistant", "content": "..."}]
-                              Noneの場合は単発リクエスト（コマンド系）として扱う。
-        extra_system_messages: system_instruction とは別に付与する追加の system メッセージ配列。
-    """
-
-    # プロンプトの抽出と返信先の決定
     if hasattr(target_message_or_text, 'content'):
         prompt_text = target_message_or_text.content
         if reply_target is None:
@@ -150,7 +132,6 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
     if reply_target is None:
         return {"success": False, "error": "返信先のオブジェクトが指定されていません。"}
 
-    # 入力中アクションを表示できる場合は表示する
     typing_manager = None
     if hasattr(reply_target, 'channel') and hasattr(reply_target.channel, 'typing'):
         typing_manager = reply_target.channel.typing()
@@ -191,3 +172,35 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
         except Exception:
             pass
         return {"success": False, "error": str(e)}
+
+
+async def deliver_ai_response(prompt_text, config, reply_target, fallback_text=None, embed=None, conversation_history=None, extra_system_messages=None):
+    try:
+        await _defer_interaction_if_needed(reply_target)
+        result = await generate_ai_text(
+            prompt_text,
+            config,
+            conversation_history=conversation_history,
+            extra_system_messages=extra_system_messages,
+        )
+
+        if result.get("success"):
+            response_text = result["response"]
+        else:
+            response_text = fallback_text or result.get("error", "エラーが発生したため、お返事できません。")
+
+        await _send_discord_response(reply_target, response_text)
+
+        if embed is not None:
+            await _send_discord_embed(reply_target, embed)
+
+        return {"success": True, "response": response_text}
+    except Exception as e:
+        error_text = fallback_text or f"エラーが発生したため、お返事できません。\n`{e}`"
+        try:
+            await _send_discord_response(reply_target, error_text)
+            if embed is not None:
+                await _send_discord_embed(reply_target, embed)
+        except Exception:
+            pass
+        return {"success": False, "error": str(e), "response": error_text}

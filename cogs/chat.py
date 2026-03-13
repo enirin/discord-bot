@@ -1,7 +1,8 @@
 import discord
 from discord.ext import commands
 import time
-from utils.ai import generate_ai_response, generate_ai_text
+from skills import SkillDispatcher
+from application.services import deliver_ai_response, generate_ai_response, generate_ai_text
 
 # チャンネルごとの会話履歴の最大保持件数（ユーザー発言＋AI返答の合計）
 DEFAULT_HISTORY_LIMIT = 20
@@ -31,6 +32,11 @@ class Chat(commands.Cog):
         self.summary_keep_recent = max(1, min(configured_keep_recent, self.history_limit))
         self.session_timeout_seconds = self.config.get('conversation_session_timeout_seconds', DEFAULT_SESSION_TIMEOUT_SECONDS)
         self.reply_cooldown_seconds = self.config.get('conversation_reply_cooldown_seconds', DEFAULT_REPLY_COOLDOWN_SECONDS)
+        self.skill_dispatcher = SkillDispatcher(
+            config,
+            bot.game_server_api,
+            bot.game_server_catalog_repository,
+        )
 
     def _get_conversation(self, channel_id):
         """チャンネルの会話履歴を取得する（なければ初期化）"""
@@ -247,6 +253,20 @@ class Chat(commands.Cog):
         channel_id = message.channel.id
         user_record = self._create_user_record(message)
         await self._add_to_conversation(channel_id, user_record)
+
+        skill_result = await self.skill_dispatcher.try_dispatch(message.content)
+        if skill_result.handled:
+            delivered = await deliver_ai_response(
+                skill_result.prompt,
+                self.config,
+                message,
+                fallback_text=skill_result.fallback_text,
+                embed=skill_result.embed,
+            )
+            if delivered.get("success"):
+                self._mark_bot_replied(channel_id)
+                await self._add_to_conversation(channel_id, self._create_assistant_record(delivered["response"]))
+            return
 
         # --- 優先キーワードの判定 (レートリミット回避) ---
         is_priority = any(kw in message.content for kw in self.priority_keywords)

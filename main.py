@@ -4,7 +4,10 @@ import yaml
 import os
 import asyncio
 import sys
-from utils.web_endpoint import WebEndpointServer
+from application.repositories import GameServerCatalogRepository
+from infrastructure.cache import GameServerCatalogCacheClient
+from infrastructure.clients import GameServerAPI
+from infrastructure.web import WebEndpointServer
 
 
 def load_config_or_exit(config_path="config.yaml"):
@@ -111,6 +114,12 @@ class SMEBot(commands.Bot):
         intents = discord.Intents.default()
         intents.message_content = True
         self.config = config_data
+        base_url = self.config.get("game_api_url", "http://localhost:5000")
+        self.game_server_api = GameServerAPI(base_url)
+        self.game_server_catalog_repository = GameServerCatalogRepository(
+            self.game_server_api,
+            GameServerCatalogCacheClient(),
+        )
         self.web_endpoint_server = WebEndpointServer(self, self.config)
         # コマンドプレフィックスを / に設定
         super().__init__(command_prefix='!', intents=intents, help_command=MyHelp())

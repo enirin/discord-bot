@@ -1,6 +1,6 @@
 from aiohttp import web
 
-from utils.ai import generate_ai_response
+from application.services.ai_response_service import generate_ai_response
 
 
 class ChannelReplyTarget:
@@ -45,8 +45,9 @@ class WebEndpointServer:
             self.site = None
 
     def _register_routes(self, app):
-        # 将来エンドポイントが増える場合はここに追加する。
         app.router.add_post("/tell", self._handle_tell)
+        app.router.add_post("/catalog/game-servers", self._handle_refresh_game_server_catalog)
+        app.router.add_get("/catalog/game-servers", self._handle_get_game_server_catalog)
 
     def _authorize(self, request):
         if not self.token:
@@ -112,4 +113,36 @@ class WebEndpointServer:
         reply_target = ChannelReplyTarget(channel)
         result = await generate_ai_response(prompt, self.config, reply_target=reply_target)
         status_code = 200 if result.get("success") else 500
+        return web.json_response(result, status=status_code)
+
+    async def _handle_refresh_game_server_catalog(self, request):
+        auth_error = self._authorize(request)
+        if auth_error is not None:
+            return auth_error
+
+        repository = getattr(self.bot, "game_server_catalog_repository", None)
+        if repository is None:
+            return web.json_response(
+                {"success": False, "error": "game_server_catalog_repository is not configured"},
+                status=500,
+            )
+
+        result = await repository.fetch_latest()
+        status_code = 200 if result.get("success") else 500
+        return web.json_response(result, status=status_code)
+
+    async def _handle_get_game_server_catalog(self, request):
+        auth_error = self._authorize(request)
+        if auth_error is not None:
+            return auth_error
+
+        repository = getattr(self.bot, "game_server_catalog_repository", None)
+        if repository is None:
+            return web.json_response(
+                {"success": False, "error": "game_server_catalog_repository is not configured"},
+                status=500,
+            )
+
+        result = await repository.get_cached()
+        status_code = 200 if result.get("success") else result.get("status", 500)
         return web.json_response(result, status=status_code)
