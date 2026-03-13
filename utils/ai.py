@@ -253,10 +253,18 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
             tool_results_texts = []
             for tool_call in tool_calls:
                 tool_res = await tool_dispatcher(tool_call)
-                # モデル非対応対策として role: user にして結果を自然言語のコンテキストとして渡す
+                # 結果をより明確にパースしやすく伝える
+                try:
+                    res_json = json.loads(tool_res)
+                    success_str = "成功" if res_json.get("success") else "失敗"
+                    detail_msg = res_json.get("message") or res_json.get("error") or tool_res
+                    content_msg = f"[外部ツール実行結果]\nステータス: {success_str}\n詳細内容: {detail_msg}\n\n上記の結果が事実です。嘘をつかずに、この内容をユーザーに報告してください。"
+                except:
+                    content_msg = f"[外部ツール実行結果]\n実行結果: {tool_res}"
+
                 current_history.append({
                     "role": "user",
-                    "content": f"[外部ツール実行システム通知]\n実行結果: {tool_res}\n\nこの実行結果を踏まえて、ユーザーに対して自然な言葉で返答を行ってください。",
+                    "content": content_msg,
                 })
             
             # 次のプロンプトを空文字または特定の内容にして再リクエスト

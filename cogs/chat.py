@@ -8,8 +8,8 @@ from utils.game_api import GameServerAPI
 # チャンネルごとの会話履歴の最大保持件数（ユーザー発言＋AI返答の合計）
 DEFAULT_HISTORY_LIMIT = 20
 DEFAULT_SUMMARY_KEEP_RECENT = 8
-DEFAULT_SESSION_TIMEOUT_SECONDS = 90
-DEFAULT_REPLY_COOLDOWN_SECONDS = 20
+DEFAULT_SESSION_TIMEOUT_SECONDS = 300
+DEFAULT_REPLY_COOLDOWN_SECONDS = 5
 
 class Chat(commands.Cog):
     def __init__(self, bot, config):
