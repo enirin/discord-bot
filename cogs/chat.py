@@ -45,6 +45,23 @@ class Chat(commands.Cog):
                         "required": ["server_name"]
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "stop_server",
+                    "description": "指定したゲームサーバーを停止します。ユーザーから「サーバーを止めて」と頼まれたときに実行します。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "server_name": {
+                                "type": "string",
+                                "description": "停止するサーバーの識別名。例: 7dtd-server-01"
+                            }
+                        },
+                        "required": ["server_name"]
+                    }
+                }
             }
         ]
         # ユーザーごとの発言時間を記録する辞書 {user_id: [timestamp, timestamp, ...]}
@@ -113,6 +130,12 @@ class Chat(commands.Cog):
             if not server_name:
                 return json.dumps({"error": "server_name is missing"}, ensure_ascii=False)
             res = await self.game_api.start_server(server_name)
+            return json.dumps(res, ensure_ascii=False)
+        elif func_name == "stop_server":
+            server_name = args.get("server_name")
+            if not server_name:
+                return json.dumps({"error": "server_name is missing"}, ensure_ascii=False)
+            res = await self.game_api.stop_server(server_name)
             return json.dumps(res, ensure_ascii=False)
         
         return json.dumps({"error": f"Unknown function: {func_name}"}, ensure_ascii=False)
