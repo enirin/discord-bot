@@ -1,18 +1,69 @@
 import discord
 from discord.ext import commands
 import time
+import json
 from utils.ai import generate_ai_response, generate_ai_text
+from utils.game_api import GameServerAPI
 
 # チャンネルごとの会話履歴の最大保持件数（ユーザー発言＋AI返答の合計）
 DEFAULT_HISTORY_LIMIT = 20
 DEFAULT_SUMMARY_KEEP_RECENT = 8
-DEFAULT_SESSION_TIMEOUT_SECONDS = 90
-DEFAULT_REPLY_COOLDOWN_SECONDS = 20
+DEFAULT_SESSION_TIMEOUT_SECONDS = 300
+DEFAULT_REPLY_COOLDOWN_SECONDS = 5
 
 class Chat(commands.Cog):
     def __init__(self, bot, config):
         self.bot = bot
         self.config = config
+        base_url = self.config.get('game_api_url', 'http://localhost:5000')
+        self.game_api = GameServerAPI(base_url)
+        self.tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_server_status",
+                    "description": "ゲームサーバーの一覧、ステータス、現在ログイン中のプレイヤー情報を取得します。ユーザーから「サーバー動いてる？」「誰か遊んでる？」と聞かれたときに使用します。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "start_server",
+                    "description": "指定したゲームサーバーを起動します。ユーザーから「サーバーを起動して」と頼まれたときに実行します。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "server_name": {
+                                "type": "string",
+                                "description": "起動するサーバーの識別名（name）。分からない場合は事前に get_server_status を実行して正しいnameを確認してください。"
+                            }
+                        },
+                        "required": ["server_name"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "stop_server",
+                    "description": "指定したゲームサーバーを停止します。ユーザーから「サーバーを止めて」と頼まれたときに実行します。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "server_name": {
+                                "type": "string",
+                                "description": "停止するサーバーの識別名（name）。分からない場合は事前に get_server_status を実行して正しいnameを確認してください。"
+                            }
+                        },
+                        "required": ["server_name"]
+                    }
+                }
+            }
+        ]
         # ユーザーごとの発言時間を記録する辞書 {user_id: [timestamp, timestamp, ...]}
         self.user_history = {}
         # コンフィグから優先キーワードを取得（なければ空リスト）
@@ -66,6 +117,30 @@ class Chat(commands.Cog):
 
         if len(history) > self.history_limit:
             await self._compress_conversation(channel_id)
+
+    async def _tool_dispatcher(self, tool_call):
+        func_name = tool_call.get("function", {}).get("name")
+        args = tool_call.get("function", {}).get("arguments", {})
+        
+        if func_name == "get_server_status":
+            res = await self.game_api.list_servers()
+            return json.dumps(res, ensure_ascii=False)
+            
+        elif func_name == "start_server":
+            server_name = args.get("server_name")
+            if not server_name:
+                return json.dumps({"error": "server_name is missing. Please provide a valid server name."}, ensure_ascii=False)
+            res = await self.game_api.start_server(server_name)
+            return json.dumps(res, ensure_ascii=False)
+            
+        elif func_name == "stop_server":
+            server_name = args.get("server_name")
+            if not server_name:
+                return json.dumps({"error": "server_name is missing. Please provide a valid server name."}, ensure_ascii=False)
+            res = await self.game_api.stop_server(server_name)
+            return json.dumps(res, ensure_ascii=False)
+        
+        return json.dumps({"error": f"Unknown function: {func_name}"}, ensure_ascii=False)
 
     def _format_history_record_for_ai(self, record):
         role = record.get("role")
@@ -144,8 +219,8 @@ class Chat(commands.Cog):
             self.channel_active_until[channel_id] = now + self.session_timeout_seconds
             return True, "name_called", True
 
-        if in_active_session and is_question and not on_cooldown:
-            return True, "active_session_question", False
+        if in_active_session and not on_cooldown:
+            return True, "active_session", False
 
         return False, "observe_only", False
 
@@ -271,6 +346,8 @@ class Chat(commands.Cog):
                 reply_target=message,
                 conversation_history=ai_history,
                 extra_system_messages=[self._get_summary_message(channel_id)],
+                tools=self.tools,
+                tool_dispatcher=self._tool_dispatcher,
             )
             if result.get("success"):
                 self._mark_bot_replied(channel_id)
@@ -304,6 +381,8 @@ class Chat(commands.Cog):
             reply_target=message,
             conversation_history=ai_history,
             extra_system_messages=[self._get_summary_message(channel_id)],
+            tools=self.tools,
+            tool_dispatcher=self._tool_dispatcher,
         )
         if result.get("success"):
             self._mark_bot_replied(channel_id)
