@@ -256,9 +256,19 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
                 # 結果をより明確にパースしやすく伝える
                 try:
                     res_json = json.loads(tool_res)
-                    success_str = "成功" if res_json.get("success") else "失敗"
-                    detail_msg = res_json.get("message") or res_json.get("error") or tool_res
-                    content_msg = f"[外部ツール実行結果]\nステータス: {success_str}\n詳細内容: {detail_msg}\n\n上記の結果が事実です。嘘をつかずに、この内容をユーザーに報告してください。"
+                    success_str = "成功" if res_json.get("success", True) else "失敗" # list_servers has no success field but we treat 200 as success
+                    
+                    # サーバー情報の詳細化
+                    info_lines = []
+                    if "servers" in res_json:
+                        for s in res_json["servers"]:
+                            p_info = s.get("stats", {})
+                            names = p_info.get("player_names", [])
+                            names_str = ", ".join(names) if names else "なし"
+                            info_lines.append(f"- サーバー: {s['name']} (状態: {s['status']}), プレイヤー数: {p_info.get('players')}, 名前: {names_str}")
+                    
+                    detail_msg = "\n".join(info_lines) if info_lines else (res_json.get("message") or res_json.get("error") or tool_res)
+                    content_msg = f"[外部ツール実行結果]\nステータス: {success_str}\nデータ詳細:\n{detail_msg}\n\n上記の結果が唯一の事実です。ここに名前がない人物はログインしていません。架空の名前を絶対に作らず、この内容のみを自然な言葉で報告してください。"
                 except:
                     content_msg = f"[外部ツール実行結果]\n実行結果: {tool_res}"
 
