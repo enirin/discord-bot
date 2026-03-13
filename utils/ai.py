@@ -1,6 +1,8 @@
 import aiohttp
 import discord
 from discord.ext import commands
+import json
+import re
 
 
 def _extract_interaction(reply_target):
@@ -57,7 +59,7 @@ def _build_system_instruction(config):
     return system_instruction
 
 
-def _build_messages(prompt_text, config, conversation_history=None, extra_system_messages=None, prompt_role=None, include_base_system_instruction=True):
+def _build_messages(prompt_text, config, conversation_history=None, extra_system_messages=None, prompt_role=None, include_base_system_instruction=True, tools=None):
     if conversation_history is not None:
         history_messages = [
             msg for msg in conversation_history
@@ -75,10 +77,26 @@ def _build_messages(prompt_text, config, conversation_history=None, extra_system
     if include_base_system_instruction:
         system_messages.append({"role": "system", "content": _build_system_instruction(config)})
 
-    if extra_system_messages:
+    final_extra_system_messages = list(extra_system_messages) if extra_system_messages else []
+    
+    if tools:
+        # モデルがネイティブTools対応していない場合のためのプロンプト注入
+        tools_list_json = json.dumps(tools, ensure_ascii=False, indent=2)
+        tool_prompt = (
+            "\n\n[システムルール: ツール呼び出し]\n"
+            "あなたは以下の外部ツールを実行することができます。\n"
+            f"{tools_list_json}\n\n"
+            "ツールを実行して情報を取得したい場合は、回答に他の文章を一切含めず、必ず以下のXMLタグで囲んだJSONフォーマットのみを絶対に出力してください。\n"
+            "<tool_call>\n"
+            "{\"name\": \"指定するツール名\", \"arguments\": {\"引数名\": \"値\"}}\n"
+            "</tool_call>\n"
+        )
+        final_extra_system_messages.append(tool_prompt)
+
+    if final_extra_system_messages:
         system_messages.extend(
             {"role": "system", "content": message}
-            for message in extra_system_messages
+            for message in final_extra_system_messages
             if message
         )
 
@@ -96,8 +114,6 @@ async def _request_ollama(config, messages, tools=None):
         "messages": messages,
         "stream": False
     }
-    if tools:
-        payload["tools"] = tools
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -107,6 +123,22 @@ async def _request_ollama(config, messages, tools=None):
                     message_obj = data.get("message", {})
                     response_text = message_obj.get("content", "")
                     tool_calls = message_obj.get("tool_calls", [])
+                    
+                    # ネイティブサポートがないモデル向けに手動パースする
+                    if not tool_calls and tools:
+                        match = re.search(r'<tool_call>\s*({.*?})\s*</tool_call>', response_text, re.DOTALL)
+                        if match:
+                            try:
+                                parsed = json.loads(match.group(1))
+                                if "name" in parsed:
+                                    if "arguments" not in parsed:
+                                        parsed["arguments"] = {}
+                                    tool_calls.append({"function": parsed})
+                                # ユーザーに見えないようにレスポンスからタグごと削除
+                                response_text = re.sub(r'<tool_call>.*?</tool_call>', '', response_text, flags=re.DOTALL).strip()
+                            except Exception as e:
+                                print(f"Manual tool parse error: {e}")
+
                     return {"success": True, "response": response_text, "tool_calls": tool_calls}
 
                 error_msg = f"AIサーバーエラー (ステータス: {resp.status})"
@@ -124,6 +156,7 @@ async def generate_ai_text(prompt_text, config, conversation_history=None, extra
         extra_system_messages=extra_system_messages,
         prompt_role=prompt_role,
         include_base_system_instruction=include_base_system_instruction,
+        tools=tools,
     )
     return await _request_ollama(config, messages, tools=tools)
 
@@ -220,10 +253,10 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
             tool_results_texts = []
             for tool_call in tool_calls:
                 tool_res = await tool_dispatcher(tool_call)
-                # Ollamaのtool応答仕様に合わせる
+                # モデル非対応対策として role: user にして結果を自然言語のコンテキストとして渡す
                 current_history.append({
-                    "role": "tool",
-                    "content": tool_res,
+                    "role": "user",
+                    "content": f"[外部ツール実行システム通知]\n実行結果: {tool_res}\n\nこの実行結果を踏まえて、ユーザーに対して自然な言葉で返答を行ってください。",
                 })
             
             # 次のプロンプトを空文字または特定の内容にして再リクエスト
