@@ -39,10 +39,9 @@ class Chat(commands.Cog):
                         "properties": {
                             "server_name": {
                                 "type": "string",
-                                "description": "起動するサーバーの識別名（name）。分からない場合は事前に get_server_status を実行して正しいnameを確認してください。"
+                                "description": "（省略可）起動するサーバーの識別名（name）。分からない場合は省略してください。"
                             }
-                        },
-                        "required": ["server_name"]
+                        }
                     }
                 }
             },
@@ -56,10 +55,9 @@ class Chat(commands.Cog):
                         "properties": {
                             "server_name": {
                                 "type": "string",
-                                "description": "停止するサーバーの識別名（name）。分からない場合は事前に get_server_status を実行して正しいnameを確認してください。"
+                                "description": "（省略可）停止するサーバーの識別名（name）。分からない場合は省略してください。"
                             }
-                        },
-                        "required": ["server_name"]
+                        }
                     }
                 }
             }
@@ -125,16 +123,42 @@ class Chat(commands.Cog):
         if func_name == "get_server_status":
             res = await self.game_api.list_servers()
             return json.dumps(res, ensure_ascii=False)
+            
         elif func_name == "start_server":
             server_name = args.get("server_name")
             if not server_name:
-                return json.dumps({"error": "server_name is missing"}, ensure_ascii=False)
+                list_res = await self.game_api.list_servers()
+                servers = list_res.get("servers", [])
+                offline_servers = [s["name"] for s in servers if s.get("status") == "offline"]
+
+                if len(offline_servers) == 1:
+                    server_name = offline_servers[0]
+                elif len(offline_servers) > 1:
+                    return json.dumps({"error": f"複数のサーバーが停止中です。どれを起動するか指定してください。停止中: {', '.join(offline_servers)}"}, ensure_ascii=False)
+                elif len(servers) == 1:
+                    server_name = servers[0]["name"]
+                else:
+                    return json.dumps({"error": "起動可能な（停止中の）サーバーが見つかりません。"}, ensure_ascii=False)
+                    
             res = await self.game_api.start_server(server_name)
             return json.dumps(res, ensure_ascii=False)
+            
         elif func_name == "stop_server":
             server_name = args.get("server_name")
             if not server_name:
-                return json.dumps({"error": "server_name is missing"}, ensure_ascii=False)
+                list_res = await self.game_api.list_servers()
+                servers = list_res.get("servers", [])
+                online_servers = [s["name"] for s in servers if s.get("status") == "online"]
+                
+                if len(online_servers) == 1:
+                    server_name = online_servers[0]
+                elif len(online_servers) > 1:
+                    return json.dumps({"error": f"複数のサーバーが稼働中です。どれを停止するか指定してください。稼働中: {', '.join(online_servers)}"}, ensure_ascii=False)
+                elif len(servers) == 1:
+                    server_name = servers[0]["name"]
+                else:
+                    return json.dumps({"error": "稼働中のサーバーが見つかりません。"}, ensure_ascii=False)
+                    
             res = await self.game_api.stop_server(server_name)
             return json.dumps(res, ensure_ascii=False)
         
@@ -217,8 +241,8 @@ class Chat(commands.Cog):
             self.channel_active_until[channel_id] = now + self.session_timeout_seconds
             return True, "name_called", True
 
-        if in_active_session and is_question and not on_cooldown:
-            return True, "active_session_question", False
+        if in_active_session and not on_cooldown:
+            return True, "active_session", False
 
         return False, "observe_only", False
 
