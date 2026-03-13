@@ -39,7 +39,7 @@ class Chat(commands.Cog):
                         "properties": {
                             "server_name": {
                                 "type": "string",
-                                "description": "起動するサーバーの識別名。例: 7dtd-server-01"
+                                "description": "起動するサーバーの識別名（name）。分からない場合は事前に get_server_status を実行して正しいnameを確認してください。"
                             }
                         },
                         "required": ["server_name"]
@@ -56,7 +56,7 @@ class Chat(commands.Cog):
                         "properties": {
                             "server_name": {
                                 "type": "string",
-                                "description": "停止するサーバーの識別名。例: 7dtd-server-01"
+                                "description": "停止するサーバーの識別名（name）。分からない場合は事前に get_server_status を実行して正しいnameを確認してください。"
                             }
                         },
                         "required": ["server_name"]
