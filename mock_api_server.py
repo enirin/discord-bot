@@ -10,6 +10,7 @@ servers_db = {
         "name": "7dtd-server-01",
         "status": "online",
         "address": "192.168.1.10",
+        "server_aliases": ["7d2d", "7days", "7dtd"],
         "stats": {
             "players": "2/8",
             "cpu": 12.5,
@@ -21,12 +22,25 @@ servers_db = {
         "name": "palworld-server",
         "status": "offline",
         "address": "192.168.1.11",
+        "server_aliases": ["palworld", "パルワールド"],
         "stats": {
             "players": "0/32",
             "cpu": 0.0,
             "memory": 0.0
         },
         "day": 0
+    },
+    "valheim-server": {
+        "name": "valheim-server",
+        "status": "online",
+        "address": "192.168.1.12",
+        "server_aliases": ["valheim", "ヴァルヘイム"],
+        "stats": {
+            "players": "3/10",
+            "cpu": 9.8,
+            "memory": 3.1
+        },
+        "day": 42
     }
 }
 
