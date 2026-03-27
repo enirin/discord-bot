@@ -4,7 +4,7 @@ from skills import GameServerSkill
 from application.services import GameServerRequestContext, deliver_skill_result
 
 class GameServer(commands.Cog, name="ゲームサーバー管理"):
-    """ゲームサーバーの起動・停止・状態確認を行うコマンド群"""
+    """ゲームサーバーの起動・停止・状態確認や IP マッピング管理を行うコマンド群"""
 
     def __init__(self, bot, config):
         self.bot = bot
@@ -48,6 +48,24 @@ class GameServer(commands.Cog, name="ゲームサーバー管理"):
     async def maintenance_server(self, ctx, server_name: str = None):
         async with ctx.typing():
             result = await self.skill.maintenance_result(server_name)
+            await self._deliver_skill_result(ctx, result)
+
+    @commands.hybrid_command(name="gs_player_lookup", description="IP または IP:port に登録されているプレイヤー名を確認します。")
+    async def lookup_ip_player_name(self, ctx, ip_address: str):
+        async with ctx.typing():
+            result = await self.skill.get_ip_player_name_result(ip_address)
+            await self._deliver_skill_result(ctx, result)
+
+    @commands.hybrid_command(name="gs_player_list", description="登録済みの IP プレイヤー名マッピング一覧を表示します。")
+    async def list_ip_player_names(self, ctx):
+        async with ctx.typing():
+            result = await self.skill.list_ip_player_names_result()
+            await self._deliver_skill_result(ctx, result)
+
+    @commands.hybrid_command(name="gs_player_register", description="IP または IP:port とプレイヤー名のマッピングを登録します。")
+    async def register_ip_player_name(self, ctx, ip_address: str, *, player_name: str):
+        async with ctx.typing():
+            result = await self.skill.register_ip_player_name_result(ip_address=ip_address, player_name=player_name)
             await self._deliver_skill_result(ctx, result)
 
     @commands.hybrid_command(name="gs_confirm", description="確認待ちのゲームサーバー操作を実行します。")

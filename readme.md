@@ -218,19 +218,27 @@ bot 起動時には MCP へ initialize し、list_tools / list_resources / list_
 * /gs\_stop \<サーバー名\>: 指定したサーバーの停止確認を開始します。
 * /gs\_status \<サーバー名\>: 指定したサーバーの状態を表示します。引数なしなら全体状況を返します。
 * /gs\_maintenance \<サーバー名\>: 指定したサーバーの保守情報を表示します。
+* /gs\_player\_lookup \<IP または IP:port\>: 指定した接続元に登録されているプレイヤー名を確認します。
+* /gs\_player\_list: 登録済みの IP プレイヤー名マッピング一覧を表示します。
+* /gs\_player\_register \<IP または IP:port\> \<プレイヤー名\>: IP とプレイヤー名の対応を登録または更新します。
 * /gs\_confirm: 確認待ちの起動停止操作を実行します。
 * /gs\_cancel: 確認待ちの起動停止操作をキャンセルします。
 
-これらの処理は内部的にはスキルとして整理されているため、同じチャンネルで自然言語でも呼び出せます。start_server / stop_server は即実行せず、確認文面を返した後に「はい」「実行して」または /gs_confirm で確定します。「いいえ」または /gs_cancel なら破棄します。
+これらの処理は内部的にはスキルとして整理されているため、同じチャンネルで自然言語でも呼び出せます。start_server / stop_server は即実行せず、確認文面を返した後に「はい」「実行して」または /gs_confirm で確定します。「いいえ」または /gs_cancel なら破棄し、タイムアウト後は再度依頼が必要です。
 
 * 「今 valheim サーバー動いてる？」
 * 「7d2d サーバー起動して」
 * 「palworld サーバー止めて」
 * 「サーバー一覧」
 * 「craftopia サーバーのメンテ情報を見せて」
+* 「203.0.113.10 のプレイヤー名を確認して」
+* 「IP プレイヤー名一覧を見せて」
+* 「203.0.113.10:54000 を Alice として登録」
 * 「CPU とメモリの負荷を教えて」
 
 自然言語からゲームサーバーを特定する別名は、MCP の list_servers で返る各サーバー情報の `server_aliases` を利用します。Bot 側は `servers` 一覧をキャッシュし、キャッシュ未作成時だけ list_servers を取得します。
+
+MCP 側の公開 tool は、`list_servers` `get_server_status` `get_server_maintenance_notes` `get_ip_player_name` `list_ip_player_names` `register_ip_player_name` `start_server` `stop_server` を前提にしています。IP プレイヤー名登録は server 側で IP 正規化されるため、`IP` と `IP:port` のどちらでも登録できます。保存結果では正規化済み IP をそのまま表示します。
 
 ## **🎮 動作確認用　モックAPIサーバーの起動**
 

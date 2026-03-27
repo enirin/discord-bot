@@ -51,17 +51,21 @@ class GameServerOperationService:
         self._pending_operations[key] = pending
         return pending
 
-    def peek_pending(self, request_context: GameServerRequestContext | None) -> PendingGameServerOperation | None:
+    def peek_pending_state(self, request_context: GameServerRequestContext | None) -> tuple[PendingGameServerOperation | None, bool]:
         key = self._build_key(request_context)
         if key is None:
-            return None
+            return None, False
 
         pending = self._pending_operations.get(key)
         if pending is None:
-            return None
+            return None, False
         if pending.expires_at <= time.time():
             del self._pending_operations[key]
-            return None
+            return None, True
+        return pending, False
+
+    def peek_pending(self, request_context: GameServerRequestContext | None) -> PendingGameServerOperation | None:
+        pending, _ = self.peek_pending_state(request_context)
         return pending
 
     def consume_pending(self, request_context: GameServerRequestContext | None) -> PendingGameServerOperation | None:

@@ -12,6 +12,9 @@ REQUIRED_TOOLS = {
     "list_servers",
     "get_server_status",
     "get_server_maintenance_notes",
+    "get_ip_player_name",
+    "list_ip_player_names",
+    "register_ip_player_name",
     "start_server",
     "stop_server",
 }
@@ -74,6 +77,36 @@ class GameServerMCPClient:
 
     async def get_server_maintenance_notes(self, server_id: str) -> dict:
         payload = await self._call_tool("get_server_maintenance_notes", {"server_id": server_id})
+        if not payload.get("success"):
+            return payload
+        return {
+            "success": True,
+            "data": payload.get("data", {}),
+        }
+
+    async def get_ip_player_name(self, ip_address: str) -> dict:
+        payload = await self._call_tool("get_ip_player_name", {"ip_address": ip_address})
+        if not payload.get("success"):
+            return payload
+        return {
+            "success": True,
+            "data": payload.get("data", {}),
+        }
+
+    async def list_ip_player_names(self) -> dict:
+        payload = await self._call_tool("list_ip_player_names")
+        if not payload.get("success"):
+            return payload
+        return {
+            "success": True,
+            "data": payload.get("data", {}),
+        }
+
+    async def register_ip_player_name(self, ip_address: str, player_name: str) -> dict:
+        payload = await self._call_tool(
+            "register_ip_player_name",
+            {"ip_address": ip_address, "player_name": player_name},
+        )
         if not payload.get("success"):
             return payload
         return {

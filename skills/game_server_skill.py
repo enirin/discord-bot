@@ -1,5 +1,6 @@
 import difflib
 import re
+import unicodedata
 
 import discord
 
@@ -16,6 +17,9 @@ MAINTENANCE_KEYWORDS = ("保守", "メンテ", "メンテナンス", "maintenanc
 SERVER_HINTS = ("サーバー", "server")
 CONFIRM_KEYWORDS = ("はい", "実行", "実行して", "お願い", "おねがい", "ok", "okay", "yes")
 CANCEL_KEYWORDS = ("いいえ", "やめて", "キャンセル", "中止", "no")
+REGISTER_KEYWORDS = ("登録", "追加", "保存", "紐付け", "ひも付け", "関連付け", "覚えて")
+IP_PLAYER_KEYWORDS = ("ip", "接続元", "プレイヤー名", "player", "マッピング", "対応")
+IP_ADDRESS_PATTERN = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?\b")
 
 COMMON_QUERY_WORDS = {
     "いま",
@@ -81,6 +85,12 @@ class GameServerSkill:
             return await self.status_result(message_content)
         if action == "maintenance":
             return await self.maintenance_result(message_content)
+        if action == "get_ip_player_name":
+            return await self.get_ip_player_name_result(message_content)
+        if action == "list_ip_player_names":
+            return await self.list_ip_player_names_result()
+        if action == "register_ip_player_name":
+            return await self.register_ip_player_name_result(query_text=message_content)
         if action == "start":
             return await self.start_server_result(message_content, request_context)
         if action == "stop":
@@ -214,6 +224,92 @@ class GameServerSkill:
             embed=self._build_maintenance_embed(data),
         )
 
+    async def get_ip_player_name_result(self, ip_address_or_query: str | None) -> SkillExecutionResult:
+        ip_address = self._extract_ip_address(ip_address_or_query)
+        if not ip_address:
+            return SkillExecutionResult(
+                handled=True,
+                response_text="確認したい IP または IP:port を教えてください。",
+            )
+
+        response = await self.api.get_ip_player_name(ip_address)
+        if not response.get("success"):
+            return SkillExecutionResult(
+                handled=True,
+                response_text=self._build_mcp_error_message(response, ip_address, "IP プレイヤー名の確認"),
+            )
+
+        data = response.get("data", {})
+        normalized_ip = data.get("ip_address", ip_address)
+        player_name = data.get("player_name")
+        if data.get("found"):
+            return SkillExecutionResult(
+                handled=True,
+                response_text=f"{normalized_ip} に登録されているプレイヤー名は {player_name} です。",
+            )
+
+        return SkillExecutionResult(
+            handled=True,
+            response_text=f"{normalized_ip} に登録されているプレイヤー名は見つかりませんでした。",
+        )
+
+    async def list_ip_player_names_result(self) -> SkillExecutionResult:
+        response = await self.api.list_ip_player_names()
+        if not response.get("success"):
+            return SkillExecutionResult(
+                handled=True,
+                response_text=self._build_mcp_error_message(response, "IP プレイヤー名一覧", "IP プレイヤー名一覧の取得"),
+            )
+
+        data = response.get("data", {})
+        mappings = data.get("mappings", [])
+        if not mappings:
+            return SkillExecutionResult(
+                handled=True,
+                response_text="IP プレイヤー名マッピングはまだ登録されていません。",
+            )
+
+        return SkillExecutionResult(
+            handled=True,
+            response_text="登録済みの IP プレイヤー名マッピング一覧です。",
+            embed=self._build_ip_player_mappings_embed(mappings, data.get("path")),
+        )
+
+    async def register_ip_player_name_result(
+        self,
+        ip_address: str | None = None,
+        player_name: str | None = None,
+        query_text: str | None = None,
+    ) -> SkillExecutionResult:
+        resolved_ip = self._extract_ip_address(ip_address or query_text)
+        resolved_player_name = (player_name or self._extract_registration_player_name(query_text)).strip()
+
+        if not resolved_ip or not resolved_player_name:
+            return SkillExecutionResult(
+                handled=True,
+                response_text="登録するには IP または IP:port とプレイヤー名を教えてください。例: `203.0.113.10 を Alice として登録`",
+            )
+
+        response = await self.api.register_ip_player_name(resolved_ip, resolved_player_name)
+        if not response.get("success"):
+            return SkillExecutionResult(
+                handled=True,
+                response_text=self._build_mcp_error_message(response, resolved_ip, "IP プレイヤー名の登録"),
+            )
+
+        data = response.get("data", {})
+        normalized_ip = data.get("ip_address", resolved_ip)
+        saved_player_name = data.get("player_name", resolved_player_name)
+        path = data.get("path")
+        response_text = f"{normalized_ip} を {saved_player_name} として登録しました。"
+        if path:
+            response_text += f" 保存先: {path}"
+
+        return SkillExecutionResult(
+            handled=True,
+            response_text=response_text,
+        )
+
     async def start_server_result(self, query_text: str | None, request_context: GameServerRequestContext | None) -> SkillExecutionResult:
         return await self._prepare_action_result("start_server", "起動", query_text, request_context)
 
@@ -221,6 +317,12 @@ class GameServerSkill:
         return await self._prepare_action_result("stop_server", "停止", query_text, request_context)
 
     async def confirm_pending_result(self, request_context: GameServerRequestContext | None) -> SkillExecutionResult:
+        pending_preview, expired = self.operation_service.peek_pending_state(request_context)
+        if pending_preview is None:
+            if expired:
+                return SkillExecutionResult(handled=True, response_text="確認待ちの操作はタイムアウトしました。もう一度依頼してください。")
+            return SkillExecutionResult(handled=True, response_text="確認待ちの操作はありません。")
+
         pending = self.operation_service.consume_pending(request_context)
         if pending is None:
             return SkillExecutionResult(handled=True, response_text="確認待ちの操作はありません。")
@@ -238,6 +340,12 @@ class GameServerSkill:
         return self._build_action_response(action_name, pending.server_id, action_response)
 
     async def cancel_pending_result(self, request_context: GameServerRequestContext | None) -> SkillExecutionResult:
+        pending_preview, expired = self.operation_service.peek_pending_state(request_context)
+        if pending_preview is None:
+            if expired:
+                return SkillExecutionResult(handled=True, response_text="確認待ちの操作はタイムアウトしました。もう一度依頼してください。")
+            return SkillExecutionResult(handled=True, response_text="確認待ちの操作はありません。")
+
         pending = self.operation_service.cancel_pending(request_context)
         if pending is None:
             return SkillExecutionResult(handled=True, response_text="確認待ちの操作はありません。")
@@ -251,6 +359,13 @@ class GameServerSkill:
     def _detect_action(self, message_content: str) -> str | None:
         normalized = normalize_text(message_content)
         has_server_hint = any(keyword in normalized for keyword in SERVER_HINTS)
+
+        if self._looks_like_ip_player_registration(normalized):
+            return "register_ip_player_name"
+        if self._looks_like_ip_player_list(normalized):
+            return "list_ip_player_names"
+        if self._looks_like_ip_player_lookup(normalized):
+            return "get_ip_player_name"
 
         if any(keyword in normalized for keyword in START_KEYWORDS):
             return "start"
@@ -307,14 +422,22 @@ class GameServerSkill:
         )
 
     async def _maybe_handle_pending_operation(self, message_content: str, request_context: GameServerRequestContext | None) -> SkillExecutionResult:
-        pending = self.operation_service.peek_pending(request_context)
+        normalized = normalize_text(message_content)
+        is_confirm = any(keyword in normalized for keyword in CONFIRM_KEYWORDS)
+        is_cancel = any(keyword in normalized for keyword in CANCEL_KEYWORDS)
+
+        pending, expired = self.operation_service.peek_pending_state(request_context)
         if pending is None:
+            if expired and (is_confirm or is_cancel):
+                return SkillExecutionResult(
+                    handled=True,
+                    response_text="確認待ちの操作はタイムアウトしました。もう一度依頼してください。",
+                )
             return SkillExecutionResult(handled=False)
 
-        normalized = normalize_text(message_content)
-        if any(keyword in normalized for keyword in CONFIRM_KEYWORDS):
+        if is_confirm:
             return await self.confirm_pending_result(request_context)
-        if any(keyword in normalized for keyword in CANCEL_KEYWORDS):
+        if is_cancel:
             return await self.cancel_pending_result(request_context)
         return SkillExecutionResult(handled=False)
 
@@ -351,6 +474,70 @@ class GameServerSkill:
         if error_code == "configuration_error":
             return f"ゲーム管理サーバー側の設定に問題があるため、{operation_label} を続行できません。 {error_message}"
         return f"{server_name} の{operation_label}に失敗しました。 {error_message}"
+
+    def _looks_like_ip_player_registration(self, normalized_text: str) -> bool:
+        return bool(
+            self._extract_ip_address(normalized_text)
+            and any(keyword in normalized_text for keyword in REGISTER_KEYWORDS)
+        )
+
+    def _looks_like_ip_player_list(self, normalized_text: str) -> bool:
+        return bool(
+            any(keyword in normalized_text for keyword in LIST_KEYWORDS)
+            and any(keyword in normalized_text for keyword in IP_PLAYER_KEYWORDS)
+            and "サーバー" not in normalized_text
+        )
+
+    def _looks_like_ip_player_lookup(self, normalized_text: str) -> bool:
+        return bool(
+            self._extract_ip_address(normalized_text)
+            and any(keyword in normalized_text for keyword in IP_PLAYER_KEYWORDS)
+        )
+
+    def _extract_ip_address(self, text: str | None) -> str:
+        normalized = normalize_text(text)
+        match = IP_ADDRESS_PATTERN.search(normalized)
+        if not match:
+            return ""
+        return match.group(0)
+
+    def _extract_registration_player_name(self, query_text: str | None) -> str:
+        normalized = unicodedata.normalize("NFKC", str(query_text or ""))
+        if not normalized:
+            return ""
+
+        candidate = IP_ADDRESS_PATTERN.sub(" ", normalized, count=1)
+        candidate = re.sub(r"(?i)\bplayer\s*name\b", " ", candidate)
+        candidate = re.sub(r"(?i)\bplayer\b", " ", candidate)
+        candidate = re.sub(r"(?i)\bip\b", " ", candidate)
+        for token in (
+            "プレイヤー名",
+            "名前",
+            "名義",
+            "マッピング",
+            "対応",
+            "登録",
+            "追加",
+            "保存",
+            "紐付け",
+            "ひも付け",
+            "関連付け",
+            "覚えて",
+            "として",
+            "で",
+            "を",
+            "に",
+            "へ",
+            "して",
+            "してください",
+            "お願い",
+            "お願いします",
+        ):
+            candidate = candidate.replace(token, " ")
+
+        candidate = re.sub(r"[\"'`「」『』]", " ", candidate)
+        candidate = re.sub(r"\s+", " ", candidate).strip()
+        return candidate
 
     def _extract_server_query(self, query_text: str | None) -> str:
         normalized = normalize_text(query_text)
@@ -522,6 +709,23 @@ class GameServerSkill:
         embed.add_field(name="server", value=str(data.get("server_id", "unknown")), inline=False)
         embed.add_field(name="path", value=path, inline=False)
         embed.description = truncated
+        return embed
+
+    def _build_ip_player_mappings_embed(self, mappings: list[dict], path: str | None) -> discord.Embed:
+        embed = discord.Embed(title="IP プレイヤー名マッピング", color=discord.Color.green())
+        if path:
+            embed.add_field(name="path", value=path, inline=False)
+
+        lines = []
+        for mapping in mappings:
+            ip_address = mapping.get("ip_address", "unknown")
+            player_name = mapping.get("player_name", "unknown")
+            lines.append(f"`{ip_address}` -> {player_name}")
+
+        description = "\n".join(lines)
+        if len(description) > 3800:
+            description = description[:3797] + "..."
+        embed.description = description or "登録はありません。"
         return embed
 
     def _build_server_detail_text(self, server: dict) -> str:

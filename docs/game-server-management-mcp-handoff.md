@@ -2,11 +2,12 @@
 
 ## 背景
 
-Game-Server-Management-API 側で、ゲームサーバー管理用 MCP server の Phase 1 実装が完了しています。
+Game-Server-Management-API 側で、ゲームサーバー管理用 MCP server の運用契約と IF 仕様が更新されています。
 
 - transport: streamable HTTP
 - 既定接続先: http://127.0.0.1:8000/mcp
 - 読み取り系 tool は自動実行可
+- IP プレイヤー名マッピング tool が追加済み
 - start_server / stop_server は確認必須
 - /tell 通知は当面そのまま維持
 
@@ -17,7 +18,8 @@ Discord bot 側は、専用 HTTP client ではなく MCP host として実装し
 1. MCP server に streamable HTTP で接続する
 2. 読み取り系 tool を AI エージェントから利用可能にする
 3. start_server / stop_server は確認フローを挟んでから実行する
-4. 将来の Discord role 制御を差し込める構造にしておく
+4. IP プレイヤー名参照・一覧・登録を利用可能にする
+5. 将来の Discord role 制御を差し込める構造にしておく
 
 ## 接続先
 
@@ -31,6 +33,9 @@ Discord bot 側は、専用 HTTP client ではなく MCP host として実装し
 - list_servers
 - get_server_status
 - get_server_maintenance_notes
+- get_ip_player_name
+- list_ip_player_names
+- register_ip_player_name
 - start_server
 - stop_server
 
@@ -44,10 +49,12 @@ Discord bot 側は、専用 HTTP client ではなく MCP host として実装し
 ## bot 側の必須運用ルール
 
 - list_servers / get_server_status / get_server_maintenance_notes は自動実行可
+- get_ip_player_name / list_ip_player_names / register_ip_player_name も自動実行可
 - start_server / stop_server は即実行しない
 - 操作対象と操作内容を明示して確認を返す
 - 明示的な肯定応答後のみ実行する
 - 否定応答またはタイムアウト時は実行しない
+- タイムアウト後は「もう一度依頼してください」と案内する
 
 推奨確認文面:
 
@@ -58,7 +65,11 @@ Discord bot 側は、専用 HTTP client ではなく MCP host として実装し
 
 接続契約:
 
-- https://github.com/enirin/Game-Server-Management-API/blob/2932683f37076e31b6a69c50d2ec76a79dc66bb1/docs/mcp-bot-connection-contract.md
+- https://github.com/enirin/Game-Server-Management-API/blob/66c4915c7bf1d090605de7a84a2718da4b150933/docs/mcp-bot-connection-contract.md
+
+IF 仕様:
+
+- https://github.com/enirin/Game-Server-Management-API/blob/66c4915c7bf1d090605de7a84a2718da4b150933/docs/mcp-interface-spec.md
 
 移行計画:
 
@@ -87,10 +98,10 @@ API 側の起動と設定:
 ## bot 側の実装順序
 
 1. MCP 接続設定を追加する
-2. list_servers を呼べるようにする
-3. get_server_status を呼べるようにする
-4. start_server / stop_server の確認フローを実装する
-5. get_server_maintenance_notes の参照を追加する
+2. list_servers / get_server_status を呼べるようにする
+3. get_server_maintenance_notes を参照できるようにする
+4. get_ip_player_name / list_ip_player_names / register_ip_player_name を利用できるようにする
+5. start_server / stop_server の確認フローを実装する
 
 ## 補足
 
