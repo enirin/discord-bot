@@ -68,7 +68,7 @@ curl -X POST "http://127.0.0.1:5050/tell" \
 
 ゲーム管理アプリ側でサーバー構成や状態の元データが更新された直後に、Bot のゲームサーバーカタログを即時更新したい場合に使います。
 
-このエンドポイントは Discord へ投稿しません。内部で `/list` を再取得し、catalog repository のキャッシュを更新するだけです。
+このエンドポイントは Discord へ投稿しません。内部で MCP の `list_servers` を再取得し、catalog repository のキャッシュを更新するだけです。
 
 ### Request body
 
@@ -76,7 +76,7 @@ body は不要です。JSON を送らなくても利用できます。
 
 ### Behavior
 
-* Bot がゲーム管理 API の `/list` を再取得します
+* Bot がゲーム管理 MCP の `list_servers` を再取得します
 * 成功時は最新 `servers` と `source: "network"` を返します
 * Discord には何も送信しません
 
@@ -107,7 +107,7 @@ body は不要です。JSON を送らなくても利用できます。
 
 * `401 unauthorized`
 * `500 game_server_catalog_repository is not configured`
-* `500` `/list` 再取得失敗時の upstream error
+* `500` `list_servers` 再取得失敗時の upstream error
 
 ### Example
 
@@ -120,7 +120,7 @@ curl -X POST "http://127.0.0.1:5050/catalog/game-servers" \
 
 現在のゲームサーバーカタログキャッシュをそのまま取得したい場合に使います。
 
-このエンドポイントは `/list` を再取得しません。現在保持しているキャッシュだけを返します。
+このエンドポイントは `list_servers` を再取得しません。現在保持しているキャッシュだけを返します。
 
 ### Behavior
 

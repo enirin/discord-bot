@@ -13,7 +13,7 @@ class SystemSkill:
     def __init__(self, config):
         self.config = config
 
-    async def try_handle(self, message_content: str) -> SkillExecutionResult:
+    async def try_handle(self, message_content: str, request_context=None) -> SkillExecutionResult:
         normalized = normalize_text(message_content)
 
         if any(keyword in normalized for keyword in LOAD_KEYWORDS):

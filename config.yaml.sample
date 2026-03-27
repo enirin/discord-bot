@@ -49,7 +49,10 @@ web_endpoint_port: 5050
 # 未設定の場合はトークン検証を行いません
 web_endpoint_token:
 
-game_api_url: "http://localhost:5000"
+game_server_mcp_url: "http://127.0.0.1:8000/mcp"
+
+# start_server / stop_server の確認待ちを保持する秒数
+game_server_operation_confirm_timeout_seconds: 60
 
 # スラッシュコマンド（/コマンド）の予測変換をすぐに反映させたい場合は、
 # ここにBotを導入したサーバー（ギルド）のIDを入力してください。

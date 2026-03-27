@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from skills import GameServerSkill
-from application.services import deliver_ai_response
+from application.services import GameServerRequestContext, deliver_skill_result
 
 class GameServer(commands.Cog, name="ゲームサーバー管理"):
     """ゲームサーバーの起動・停止・状態確認を行うコマンド群"""
@@ -9,7 +9,12 @@ class GameServer(commands.Cog, name="ゲームサーバー管理"):
     def __init__(self, bot, config):
         self.bot = bot
         self.config = config
-        self.skill = GameServerSkill(config, bot.game_server_api, bot.game_server_catalog_repository)
+        self.skill = GameServerSkill(
+            config,
+            bot.game_server_api,
+            bot.game_server_catalog_repository,
+            bot.game_server_operation_service,
+        )
 
     @commands.hybrid_command(name="gs_list", description="管理下のゲームサーバー一覧とステータスを表示します。")
     async def list_servers(self, ctx):
@@ -22,14 +27,14 @@ class GameServer(commands.Cog, name="ゲームサーバー管理"):
     async def start_server(self, ctx, server_name: str = None):
         """指定サーバーを起動、引数がない場合は一覧を提示"""
         async with ctx.typing():
-            result = await self.skill.start_server_result(server_name)
+            result = await self.skill.start_server_result(server_name, self._build_request_context(ctx, source="command"))
             await self._deliver_skill_result(ctx, result)
 
     @commands.hybrid_command(name="gs_stop", description="指定したサーバーを停止します。引数にサーバー名が必要です。")
     async def stop_server(self, ctx, server_name: str = None):
         """指定サーバーを停止、引数がない場合は一覧を提示"""
         async with ctx.typing():
-            result = await self.skill.stop_server_result(server_name)
+            result = await self.skill.stop_server_result(server_name, self._build_request_context(ctx, source="command"))
             await self._deliver_skill_result(ctx, result)
 
     @commands.hybrid_command(name="gs_status", description="指定したサーバーの状態を確認します。引数なしなら全体状況を表示します。")
@@ -39,13 +44,39 @@ class GameServer(commands.Cog, name="ゲームサーバー管理"):
             result = await self.skill.status_result(server_name)
             await self._deliver_skill_result(ctx, result)
 
+    @commands.hybrid_command(name="gs_maintenance", description="指定したサーバーの保守情報を表示します。")
+    async def maintenance_server(self, ctx, server_name: str = None):
+        async with ctx.typing():
+            result = await self.skill.maintenance_result(server_name)
+            await self._deliver_skill_result(ctx, result)
+
+    @commands.hybrid_command(name="gs_confirm", description="確認待ちのゲームサーバー操作を実行します。")
+    async def confirm_server_operation(self, ctx):
+        async with ctx.typing():
+            result = await self.skill.confirm_pending_result(self._build_request_context(ctx, source="command"))
+            await self._deliver_skill_result(ctx, result)
+
+    @commands.hybrid_command(name="gs_cancel", description="確認待ちのゲームサーバー操作をキャンセルします。")
+    async def cancel_server_operation(self, ctx):
+        async with ctx.typing():
+            result = await self.skill.cancel_pending_result(self._build_request_context(ctx, source="command"))
+            await self._deliver_skill_result(ctx, result)
+
     async def _deliver_skill_result(self, ctx, result):
-        await deliver_ai_response(
-            result.prompt,
+        await deliver_skill_result(
+            result,
             self.config,
             ctx,
-            fallback_text=result.fallback_text,
-            embed=result.embed,
+        )
+
+    def _build_request_context(self, ctx, source: str) -> GameServerRequestContext:
+        author = getattr(ctx, "author", None)
+        channel = getattr(ctx, "channel", None)
+        return GameServerRequestContext(
+            requester_id=getattr(author, "id", None),
+            requester_name=getattr(author, "display_name", None),
+            channel_id=getattr(channel, "id", None),
+            source=source,
         )
 
 async def setup(bot):

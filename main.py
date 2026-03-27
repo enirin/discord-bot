@@ -5,8 +5,9 @@ import os
 import asyncio
 import sys
 from application.repositories import GameServerCatalogRepository
+from application.services import GameServerOperationService
 from infrastructure.cache import GameServerCatalogCacheClient
-from infrastructure.clients import GameServerAPI
+from infrastructure.clients import GameServerMCPClient
 from infrastructure.web import WebEndpointServer
 
 
@@ -55,6 +56,7 @@ def load_config_or_exit(config_path="config.yaml"):
     numeric_optional_fields = [
         "guild_id",
         "web_endpoint_port",
+        "game_server_operation_confirm_timeout_seconds",
     ]
 
     for channel_id in loaded.get("channel_ids", []):
@@ -114,11 +116,14 @@ class SMEBot(commands.Bot):
         intents = discord.Intents.default()
         intents.message_content = True
         self.config = config_data
-        base_url = self.config.get("game_api_url", "http://localhost:5000")
-        self.game_server_api = GameServerAPI(base_url)
+        mcp_url = self.config.get("game_server_mcp_url") or self.config.get("game_api_url") or "http://127.0.0.1:8000/mcp"
+        self.game_server_api = GameServerMCPClient(mcp_url)
         self.game_server_catalog_repository = GameServerCatalogRepository(
             self.game_server_api,
             GameServerCatalogCacheClient(),
+        )
+        self.game_server_operation_service = GameServerOperationService(
+            timeout_seconds=self.config.get("game_server_operation_confirm_timeout_seconds", 60)
         )
         self.web_endpoint_server = WebEndpointServer(self, self.config)
         # コマンドプレフィックスを / に設定
@@ -127,6 +132,27 @@ class SMEBot(commands.Bot):
     async def setup_hook(self):
         """起動時にCogsを読み込み、Webエンドポイントサーバーを起動する。"""
         await self.web_endpoint_server.start()
+
+        try:
+            discovery = await self.game_server_api.start()
+            if discovery.get("success"):
+                print(
+                    "Connected to game server MCP: "
+                    f"tools={discovery.get('tools', [])}, "
+                    f"resources={discovery.get('resources', [])}, "
+                    f"templates={discovery.get('resource_templates', [])}"
+                )
+            else:
+                print(
+                    "Game server MCP discovery incomplete: "
+                    f"missing_tools={discovery.get('missing_tools', [])}, "
+                    f"missing_resources={discovery.get('missing_resources', [])}, "
+                    f"missing_resource_templates={discovery.get('missing_resource_templates', [])}"
+                )
+            self.game_server_mcp_discovery = discovery
+        except Exception as error:
+            print(f"Game server MCP initialization failed: {error}")
+            self.game_server_mcp_discovery = {"success": False, "error": str(error)}
 
         for filename in os.listdir('./cogs'):
             if filename.endswith('.py'):
@@ -174,6 +200,7 @@ class SMEBot(commands.Bot):
 
     async def close(self):
         await self.web_endpoint_server.stop()
+        await self.game_server_api.close()
         await super().close()
 
 async def on_message(self, message):

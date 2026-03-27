@@ -216,7 +216,7 @@ async def restart_server(self, ctx, server_name: str = None):
 
 ### Implementation idea
 
-このケースでは、新しい外部 API が不要なら `GameServerSkill` の既存 `/list` キャッシュをそのまま使えます。
+このケースでは、新しい外部 API が不要なら `GameServerSkill` の既存 `list_servers` キャッシュをそのまま使えます。
 
 1. `skills/game_server_skill.py` に `PLAYERS_KEYWORDS` を追加する
 2. `_detect_action()` で `players` のような内部アクションを返せるようにする
@@ -236,7 +236,7 @@ async def restart_server(self, ctx, server_name: str = None):
 ### Goal
 
 * `POST /catalog/game-servers`
-* 外部システムから更新通知を受けたら、Bot 側で `/list` を再取得して catalog を更新する
+* 外部システムから更新通知を受けたら、Bot 側で `list_servers` を再取得して catalog を更新する
 * Discord へは何も投稿しない
 
 ### Implementation idea

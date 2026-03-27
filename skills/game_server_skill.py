@@ -3,6 +3,7 @@ import re
 
 import discord
 
+from application.services import GameServerRequestContext
 from skills.result import SkillExecutionResult
 from skills.text_utils import compact_text, normalize_text
 
@@ -11,11 +12,11 @@ START_KEYWORDS = ("起動", "立ち上げ", "立ちあげ", "start", "オンに"
 STOP_KEYWORDS = ("停止", "止め", "とめ", "stop", "落として", "シャットダウン", "オフに")
 LIST_KEYWORDS = ("一覧", "リスト", "list", "全部", "全体")
 STATUS_KEYWORDS = ("状態", "status", "動いてる", "動作", "稼働", "オンライン", "オフライン")
+MAINTENANCE_KEYWORDS = ("保守", "メンテ", "メンテナンス", "maintenance")
 SERVER_HINTS = ("サーバー", "server")
+CONFIRM_KEYWORDS = ("はい", "実行", "実行して", "お願い", "おねがい", "ok", "okay", "yes")
+CANCEL_KEYWORDS = ("いいえ", "やめて", "キャンセル", "中止", "no")
 
-# 自然文からサーバー名候補だけを抜き出すためのストップワード集合。
-# _extract_server_query() で操作語や機能語を落とし、識別名や alias らしい断片を
-# 類似度比較に回しやすくするために使う。
 COMMON_QUERY_WORDS = {
     "いま",
     "今",
@@ -52,15 +53,24 @@ COMMON_QUERY_WORDS = {
     "リスト",
     "全部",
     "全体",
+    "保守",
+    "メンテ",
+    "メンテナンス",
 }
 
 
 class GameServerSkill:
-    def __init__(self, config, api_client, catalog_repository):
+    def __init__(self, config, api_client, catalog_repository, operation_service):
+        self.config = config
         self.api = api_client
         self.catalog_repository = catalog_repository
+        self.operation_service = operation_service
 
-    async def try_handle(self, message_content: str) -> SkillExecutionResult:
+    async def try_handle(self, message_content: str, request_context: GameServerRequestContext | None = None) -> SkillExecutionResult:
+        pending_result = await self._maybe_handle_pending_operation(message_content, request_context)
+        if pending_result.handled:
+            return pending_result
+
         action = self._detect_action(message_content)
         if action is None:
             return SkillExecutionResult(handled=False)
@@ -69,10 +79,12 @@ class GameServerSkill:
             return await self.list_servers_result()
         if action == "status":
             return await self.status_result(message_content)
+        if action == "maintenance":
+            return await self.maintenance_result(message_content)
         if action == "start":
-            return await self.start_server_result(message_content)
+            return await self.start_server_result(message_content, request_context)
         if action == "stop":
-            return await self.stop_server_result(message_content)
+            return await self.stop_server_result(message_content, request_context)
 
         return SkillExecutionResult(handled=False)
 
@@ -148,6 +160,10 @@ class GameServerSkill:
                 fallback_text=resolution_error,
             )
 
+        status_response = await self.api.get_server_status(resolved_server.get("name"))
+        if status_response.get("success") and status_response.get("server"):
+            resolved_server = status_response["server"]
+
         status = resolved_server.get("status", "unknown")
         stats = resolved_server.get("stats", {})
         return SkillExecutionResult(
@@ -163,11 +179,74 @@ class GameServerSkill:
             embed=self._build_single_server_embed(resolved_server),
         )
 
-    async def start_server_result(self, query_text: str | None) -> SkillExecutionResult:
-        return await self._execute_action_result("起動", query_text)
+    async def maintenance_result(self, query_text: str | None) -> SkillExecutionResult:
+        res = await self.catalog_repository.get_cached_or_fetch()
+        if not res["success"]:
+            error = res.get("error", "不明なエラー")
+            return SkillExecutionResult(
+                handled=True,
+                response_text=f"保守情報を確認する前にサーバー一覧を取得できませんでした。 {error}",
+            )
 
-    async def stop_server_result(self, query_text: str | None) -> SkillExecutionResult:
-        return await self._execute_action_result("停止", query_text)
+        servers = res.get("servers", [])
+        resolved_server, resolution_error, has_server_candidate = self._resolve_server_from_raw_query(query_text, servers)
+        if not has_server_candidate:
+            server_names = ", ".join(f"「{server.get('name')}」" for server in servers)
+            return SkillExecutionResult(
+                handled=True,
+                response_text=f"どのサーバーの保守情報を見るか教えてください。対象は {server_names} です。",
+            )
+
+        if resolved_server is None:
+            return SkillExecutionResult(handled=True, response_text=resolution_error)
+
+        maintenance = await self.api.get_server_maintenance_notes(resolved_server.get("name"))
+        if not maintenance.get("success"):
+            return SkillExecutionResult(
+                handled=True,
+                response_text=self._build_mcp_error_message(maintenance, resolved_server.get("name"), "保守情報の取得"),
+            )
+
+        data = maintenance.get("data", {})
+        return SkillExecutionResult(
+            handled=True,
+            response_text=f"{resolved_server.get('name')} の保守情報です。",
+            embed=self._build_maintenance_embed(data),
+        )
+
+    async def start_server_result(self, query_text: str | None, request_context: GameServerRequestContext | None) -> SkillExecutionResult:
+        return await self._prepare_action_result("start_server", "起動", query_text, request_context)
+
+    async def stop_server_result(self, query_text: str | None, request_context: GameServerRequestContext | None) -> SkillExecutionResult:
+        return await self._prepare_action_result("stop_server", "停止", query_text, request_context)
+
+    async def confirm_pending_result(self, request_context: GameServerRequestContext | None) -> SkillExecutionResult:
+        pending = self.operation_service.consume_pending(request_context)
+        if pending is None:
+            return SkillExecutionResult(handled=True, response_text="確認待ちの操作はありません。")
+
+        if pending.operation == "start_server":
+            action_response = await self.api.start_server(pending.server_id)
+            action_name = "起動"
+        else:
+            action_response = await self.api.stop_server(pending.server_id)
+            action_name = "停止"
+
+        if action_response.get("success"):
+            await self.catalog_repository.refresh_after_mutation()
+
+        return self._build_action_response(action_name, pending.server_id, action_response)
+
+    async def cancel_pending_result(self, request_context: GameServerRequestContext | None) -> SkillExecutionResult:
+        pending = self.operation_service.cancel_pending(request_context)
+        if pending is None:
+            return SkillExecutionResult(handled=True, response_text="確認待ちの操作はありません。")
+
+        action_name = "起動" if pending.operation == "start_server" else "停止"
+        return SkillExecutionResult(
+            handled=True,
+            response_text=f"{pending.server_id} の{action_name}はキャンセルしました。",
+        )
 
     def _detect_action(self, message_content: str) -> str | None:
         normalized = normalize_text(message_content)
@@ -177,6 +256,8 @@ class GameServerSkill:
             return "start"
         if any(keyword in normalized for keyword in STOP_KEYWORDS):
             return "stop"
+        if any(keyword in normalized for keyword in MAINTENANCE_KEYWORDS):
+            return "maintenance"
         if any(keyword in normalized for keyword in LIST_KEYWORDS) and has_server_hint:
             return "list"
         if any(keyword in normalized for keyword in STATUS_KEYWORDS) and has_server_hint:
@@ -184,17 +265,13 @@ class GameServerSkill:
 
         return None
 
-    async def _execute_action_result(self, action_name: str, query_text: str | None) -> SkillExecutionResult:
+    async def _prepare_action_result(self, operation: str, action_name: str, query_text: str | None, request_context: GameServerRequestContext | None) -> SkillExecutionResult:
         res = await self.catalog_repository.get_cached_or_fetch()
         if not res["success"]:
             error = res.get("error", "不明なエラー")
             return SkillExecutionResult(
                 handled=True,
-                prompt=(
-                    f"システム情報: サーバーの{action_name}対象を確認するため一覧を取得しようとしましたが、"
-                    f"エラーが発生しました（内容: {error}）。ユーザーに状況を伝えてください。"
-                ),
-                fallback_text=f"サーバー一覧を取得できないため、{action_name}対象を確認できません。 {error}",
+                response_text=f"サーバー一覧を取得できないため、{action_name}対象を確認できません。 {error}",
             )
 
         servers = res.get("servers", [])
@@ -203,79 +280,77 @@ class GameServerSkill:
             server_names = ", ".join(f"「{server.get('name')}」" for server in servers)
             return SkillExecutionResult(
                 handled=True,
-                prompt=(
-                    f"システム情報: ユーザーがゲームサーバーの{action_name}を依頼しましたが、"
-                    f"サーバー名を特定できませんでした。現在登録されているサーバーは {server_names} です。"
-                    f"どのサーバーを{action_name}したいか、自然に聞き返してください。"
-                ),
-                fallback_text=f"どのサーバーを{action_name}するか教えてください。対象は {server_names} です。",
+                response_text=f"どのサーバーを{action_name}するか教えてください。対象は {server_names} です。",
             )
 
         if resolved_server is None:
-            return SkillExecutionResult(
-                handled=True,
-                prompt=(
-                    f"システム情報: ユーザーはゲームサーバーの{action_name}を依頼していますが、"
-                    f"対象サーバーを特定できませんでした。{resolution_error}。"
-                    f"ユーザーに、{action_name}したいサーバー名を確認してください。"
-                ),
-                fallback_text=resolution_error,
-            )
+            return SkillExecutionResult(handled=True, response_text=resolution_error)
 
         server_name = resolved_server.get("name")
-        if action_name == "起動":
-            action_response = await self.api.start_server(server_name)
-        else:
-            action_response = await self.api.stop_server(server_name)
-
-        if action_response.get("status") == 200:
-            await self.catalog_repository.refresh_after_mutation()
-
-        return self._build_action_response(action_name, server_name, action_response)
-
-    def _build_action_response(self, action_name: str, server_name: str, res: dict) -> SkillExecutionResult:
-        if not res["success"] and res.get("is_connection_error"):
-            error = res.get("error", "接続エラー")
+        is_allowed, denial_reason = self.operation_service.authorize(request_context, operation, server_name)
+        if not is_allowed:
             return SkillExecutionResult(
                 handled=True,
-                prompt=(
-                    f"システム情報: ゲームサーバー「{server_name}」の{action_name}処理中に接続エラーが発生しました"
-                    f"（エラー: {error}）。ユーザーに状況を伝えてください。"
-                ),
-                fallback_text=f"{server_name} の{action_name}中に接続エラーが発生しました。 {error}",
+                response_text=denial_reason or f"{server_name} の{action_name}は許可されていません。",
             )
 
-        status = res.get("status")
-        data = res.get("data", {})
+        pending = self.operation_service.create_pending(operation, server_name, request_context)
+        if pending is None:
+            return SkillExecutionResult(
+                handled=True,
+                response_text=f"{server_name} の{action_name}確認を開始できませんでした。もう一度お試しください。",
+            )
+
+        return SkillExecutionResult(
+            handled=True,
+            response_text=f"`{server_name}` を{action_name}します。実行しますか？",
+        )
+
+    async def _maybe_handle_pending_operation(self, message_content: str, request_context: GameServerRequestContext | None) -> SkillExecutionResult:
+        pending = self.operation_service.peek_pending(request_context)
+        if pending is None:
+            return SkillExecutionResult(handled=False)
+
+        normalized = normalize_text(message_content)
+        if any(keyword in normalized for keyword in CONFIRM_KEYWORDS):
+            return await self.confirm_pending_result(request_context)
+        if any(keyword in normalized for keyword in CANCEL_KEYWORDS):
+            return await self.cancel_pending_result(request_context)
+        return SkillExecutionResult(handled=False)
+
+    def _build_action_response(self, action_name: str, server_name: str, response: dict) -> SkillExecutionResult:
+        if not response.get("success") and response.get("is_connection_error"):
+            error = response.get("error", "接続エラー")
+            return SkillExecutionResult(
+                handled=True,
+                response_text=f"{server_name} の{action_name}中に接続エラーが発生しました。 {error}",
+            )
+
+        if not response.get("success"):
+            return SkillExecutionResult(
+                handled=True,
+                response_text=self._build_mcp_error_message(response, server_name, f"{action_name}処理"),
+            )
+
+        data = response.get("data", {})
         message = data.get("message", "不明な応答")
-        api_success = bool(data.get("success", res.get("success")))
+        return SkillExecutionResult(
+            handled=True,
+            response_text=f"{server_name} を{action_name}しました。 {message}",
+        )
 
-        if status == 200 and api_success:
-            prompt = (
-                f"システム情報: ユーザーの依頼に応じてゲームサーバー「{server_name}」を{action_name}しました。"
-                f"API 応答は「{message}」です。結果を自然に報告してください。"
-            )
-            fallback = f"{server_name} を{action_name}しました。 {message}"
-        elif status == 200:
-            prompt = (
-                f"システム情報: ゲームサーバー「{server_name}」の{action_name}要求は受け付けられましたが、"
-                f"API からは「{message}」という案内でした。状況を自然に伝えてください。"
-            )
-            fallback = f"{server_name} の{action_name}結果: {message}"
-        elif status == 404:
-            prompt = (
-                f"システム情報: ゲームサーバー「{server_name}」を{action_name}しようとしましたが、"
-                "そんな名前のサーバーは見つかりませんでした。ユーザーに伝えてください。"
-            )
-            fallback = f"{server_name} というサーバーは見つかりませんでした。"
-        else:
-            prompt = (
-                f"システム情報: ゲームサーバー「{server_name}」を{action_name}しようとしましたが、"
-                f"エラーが発生しました（内容: {message}）。状況を報告してください。"
-            )
-            fallback = f"{server_name} の{action_name}中にエラーが発生しました。 {message}"
-
-        return SkillExecutionResult(handled=True, prompt=prompt, fallback_text=fallback)
+    def _build_mcp_error_message(self, response: dict, server_name: str, operation_label: str) -> str:
+        error_code = response.get("error_code")
+        error_message = response.get("error") or "不明なエラー"
+        if error_code == "not_found":
+            return f"{server_name} は見つかりませんでした。"
+        if error_code == "invalid_state":
+            return f"{server_name} は現在の状態では {operation_label} を実行できません。 {error_message}"
+        if error_code == "runtime_unavailable":
+            return f"ゲーム管理サーバーが一時的に利用できません。少し待ってから再試行してください。 {error_message}"
+        if error_code == "configuration_error":
+            return f"ゲーム管理サーバー側の設定に問題があるため、{operation_label} を続行できません。 {error_message}"
+        return f"{server_name} の{operation_label}に失敗しました。 {error_message}"
 
     def _extract_server_query(self, query_text: str | None) -> str:
         normalized = normalize_text(query_text)
@@ -283,7 +358,7 @@ class GameServerSkill:
             return ""
 
         stripped = normalized
-        for keyword in START_KEYWORDS + STOP_KEYWORDS + LIST_KEYWORDS + STATUS_KEYWORDS + SERVER_HINTS:
+        for keyword in START_KEYWORDS + STOP_KEYWORDS + LIST_KEYWORDS + STATUS_KEYWORDS + MAINTENANCE_KEYWORDS + SERVER_HINTS:
             stripped = stripped.replace(keyword, " ")
 
         for word in COMMON_QUERY_WORDS:
@@ -433,6 +508,20 @@ class GameServerSkill:
     def _build_single_server_embed(self, server: dict) -> discord.Embed:
         embed = discord.Embed(title=f"{server.get('name', 'unknown')} の状態", color=discord.Color.blue())
         embed.add_field(name="詳細", value=self._build_server_detail_text(server), inline=False)
+        return embed
+
+    def _build_maintenance_embed(self, data: dict) -> discord.Embed:
+        game = data.get("game", "unknown")
+        path = data.get("path", "unknown")
+        content = str(data.get("content", "")).strip() or "保守情報は空でした。"
+        truncated = content[:3800]
+        if len(content) > len(truncated):
+            truncated += "\n..."
+
+        embed = discord.Embed(title=f"{game} 保守情報", color=discord.Color.orange())
+        embed.add_field(name="server", value=str(data.get("server_id", "unknown")), inline=False)
+        embed.add_field(name="path", value=path, inline=False)
+        embed.description = truncated
         return embed
 
     def _build_server_detail_text(self, server: dict) -> str:

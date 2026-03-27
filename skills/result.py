@@ -9,3 +9,4 @@ class SkillExecutionResult:
     prompt: str | None = None
     fallback_text: str | None = None
     embed: discord.Embed | None = None
+    response_text: str | None = None

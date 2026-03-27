@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from skills import SystemSkill
-from application.services import deliver_ai_response
+from application.services import deliver_skill_result
 
 class System(commands.Cog, name="システム機能"):
     """サーバーの状態確認などのシステム系コマンド"""
@@ -23,12 +23,10 @@ class System(commands.Cog, name="システム機能"):
         await self._deliver_skill_result(ctx, result)
 
     async def _deliver_skill_result(self, ctx, result):
-        await deliver_ai_response(
-            result.prompt,
+        await deliver_skill_result(
+            result,
             self.config,
             ctx,
-            fallback_text=result.fallback_text,
-            embed=result.embed,
         )
 
 async def setup(bot):

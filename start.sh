@@ -20,6 +20,42 @@ if [ ! -f "config.yaml" ]; then
     exit 1
 fi
 
+VENV_DIR="./venv"
+VENV_PYTHON="$VENV_DIR/bin/python"
+VENV_PIP="$VENV_DIR/bin/pip"
+REQUIREMENTS_STAMP="$VENV_DIR/.requirements.txt"
+
+if [ ! -x "$VENV_PYTHON" ]; then
+    echo "🐍 Python仮想環境が見つからないため作成します..."
+    python3 -m venv "$VENV_DIR"
+fi
+
+sync_requirements=false
+
+if [ ! -x "$VENV_PIP" ]; then
+    echo "📦 pip が見つからないため、依存関係を再構成します..."
+    sync_requirements=true
+fi
+
+if [ ! -f "$REQUIREMENTS_STAMP" ] || ! cmp -s requirements.txt "$REQUIREMENTS_STAMP"; then
+    sync_requirements=true
+fi
+
+if ! "$VENV_PYTHON" -c "import discord, yaml" > /dev/null 2>&1; then
+    sync_requirements=true
+fi
+
+if ! "$VENV_PYTHON" -c "import mcp" > /dev/null 2>&1; then
+    sync_requirements=true
+fi
+
+if [ "$sync_requirements" = true ]; then
+    echo "📦 Python依存関係を同期しています..."
+    "$VENV_PYTHON" -m pip install --upgrade pip
+    "$VENV_PYTHON" -m pip install -r requirements.txt
+    cp requirements.txt "$REQUIREMENTS_STAMP"
+fi
+
 # Ollamaの起動状態を確認し、未起動であれば起動する
 echo "🤖 Ollamaの起動状態を確認しています..."
 if ollama list > /dev/null 2>&1; then
@@ -37,4 +73,4 @@ else
 fi
 
 echo "🚀 Botを起動しています..."
-./venv/bin/python main.py
+"$VENV_PYTHON" main.py

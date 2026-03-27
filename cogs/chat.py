@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 import time
 from skills import SkillDispatcher
-from application.services import deliver_ai_response, generate_ai_response, generate_ai_text
+from application.services import GameServerRequestContext, deliver_skill_result, generate_ai_response, generate_ai_text
 
 # チャンネルごとの会話履歴の最大保持件数（ユーザー発言＋AI返答の合計）
 DEFAULT_HISTORY_LIMIT = 20
@@ -36,6 +36,7 @@ class Chat(commands.Cog):
             config,
             bot.game_server_api,
             bot.game_server_catalog_repository,
+            bot.game_server_operation_service,
         )
 
     def _get_conversation(self, channel_id):
@@ -254,14 +255,20 @@ class Chat(commands.Cog):
         user_record = self._create_user_record(message)
         await self._add_to_conversation(channel_id, user_record)
 
-        skill_result = await self.skill_dispatcher.try_dispatch(message.content)
+        skill_result = await self.skill_dispatcher.try_dispatch(
+            message.content,
+            GameServerRequestContext(
+                requester_id=message.author.id,
+                requester_name=message.author.display_name,
+                channel_id=message.channel.id,
+                source="chat",
+            ),
+        )
         if skill_result.handled:
-            delivered = await deliver_ai_response(
-                skill_result.prompt,
+            delivered = await deliver_skill_result(
+                skill_result,
                 self.config,
                 message,
-                fallback_text=skill_result.fallback_text,
-                embed=skill_result.embed,
             )
             if delivered.get("success"):
                 self._mark_bot_replied(channel_id)

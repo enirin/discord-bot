@@ -25,6 +25,16 @@ async def _defer_interaction_if_needed(reply_target):
     await interaction.response.defer(thinking=True)
 
 
+def _extract_typing_manager(reply_target):
+    if hasattr(reply_target, 'channel') and hasattr(reply_target.channel, 'typing'):
+        return reply_target.channel.typing()
+
+    if hasattr(reply_target, 'typing'):
+        return reply_target.typing()
+
+    return None
+
+
 async def _send_discord_response(reply_target, content):
     interaction = _extract_interaction(reply_target)
     if interaction is not None:
@@ -67,6 +77,21 @@ async def _send_discord_embed(reply_target, embed):
         return
 
     raise TypeError("返信先のオブジェクトがDiscord埋め込み送信に対応していません。")
+
+
+async def _send_direct_response(reply_target, response_text, embed=None):
+    await _send_discord_response(reply_target, response_text)
+    if embed is not None:
+        await _send_discord_embed(reply_target, embed)
+    return {"success": True, "response": response_text}
+
+
+def _build_skill_response_prompt(response_text):
+    return (
+        "システム情報: 以下の案内内容を、意味を変えずにユーザーへ自然に伝えてください。"
+        "サーバー名、起動/停止/保守情報などの事実は変えないでください。"
+        f"\n案内内容: {response_text}"
+    )
 
 
 def _build_system_instruction(config):
@@ -132,11 +157,7 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
     if reply_target is None:
         return {"success": False, "error": "返信先のオブジェクトが指定されていません。"}
 
-    typing_manager = None
-    if hasattr(reply_target, 'channel') and hasattr(reply_target.channel, 'typing'):
-        typing_manager = reply_target.channel.typing()
-    elif hasattr(reply_target, 'typing'):
-        typing_manager = reply_target.typing()
+    typing_manager = _extract_typing_manager(reply_target)
 
     try:
         await _defer_interaction_if_needed(reply_target)
@@ -177,12 +198,23 @@ async def generate_ai_response(target_message_or_text, config, reply_target=None
 async def deliver_ai_response(prompt_text, config, reply_target, fallback_text=None, embed=None, conversation_history=None, extra_system_messages=None):
     try:
         await _defer_interaction_if_needed(reply_target)
-        result = await generate_ai_text(
-            prompt_text,
-            config,
-            conversation_history=conversation_history,
-            extra_system_messages=extra_system_messages,
-        )
+        typing_manager = _extract_typing_manager(reply_target)
+
+        if typing_manager:
+            async with typing_manager:
+                result = await generate_ai_text(
+                    prompt_text,
+                    config,
+                    conversation_history=conversation_history,
+                    extra_system_messages=extra_system_messages,
+                )
+        else:
+            result = await generate_ai_text(
+                prompt_text,
+                config,
+                conversation_history=conversation_history,
+                extra_system_messages=extra_system_messages,
+            )
 
         if result.get("success"):
             response_text = result["response"]
@@ -204,3 +236,26 @@ async def deliver_ai_response(prompt_text, config, reply_target, fallback_text=N
         except Exception:
             pass
         return {"success": False, "error": str(e), "response": error_text}
+
+
+async def deliver_skill_result(result, config, reply_target, conversation_history=None, extra_system_messages=None):
+    if result.response_text is not None:
+        return await deliver_ai_response(
+            _build_skill_response_prompt(result.response_text),
+            config,
+            reply_target,
+            fallback_text=result.response_text,
+            embed=result.embed,
+            conversation_history=conversation_history,
+            extra_system_messages=extra_system_messages,
+        )
+
+    return await deliver_ai_response(
+        result.prompt,
+        config,
+        reply_target,
+        fallback_text=result.fallback_text,
+        embed=result.embed,
+        conversation_history=conversation_history,
+        extra_system_messages=extra_system_messages,
+    )
