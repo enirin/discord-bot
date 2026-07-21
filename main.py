@@ -7,7 +7,7 @@ import sys
 from application.repositories import GameServerCatalogRepository
 from application.services import GameServerOperationService
 from infrastructure.cache import GameServerCatalogCacheClient
-from infrastructure.clients import GameServerMCPClient
+from infrastructure.clients import GameServerMCPClient, BlenderMCPClient
 from infrastructure.web import WebEndpointServer
 
 
@@ -116,6 +116,9 @@ class SMEBot(commands.Bot):
         intents = discord.Intents.default()
         intents.message_content = True
         self.config = config_data
+        # Blender MCP Clientの追加（設定があればそのURL、無ければデフォルト）
+        blender_mcp_url = self.config.get("blender_mcp_url", "http://127.0.0.1:8001/mcp")
+        self.blender_mcp_client = BlenderMCPClient(blender_mcp_url)
         mcp_url = self.config.get("game_server_mcp_url") or self.config.get("game_api_url") or "http://127.0.0.1:8000/mcp"
         self.game_server_api = GameServerMCPClient(mcp_url)
         self.game_server_catalog_repository = GameServerCatalogRepository(
@@ -132,6 +135,13 @@ class SMEBot(commands.Bot):
     async def setup_hook(self):
         """起動時にCogsを読み込み、Webエンドポイントサーバーを起動する。"""
         await self.web_endpoint_server.start()
+
+        # Blender MCP のスタート
+        try:
+            blender_discovery = await self.blender_mcp_client.start()
+            print(f"Connected to Blender MCP: {blender_discovery}")
+        except Exception as error:
+            print(f"Blender MCP initialization failed: {error}")
 
         try:
             discovery = await self.game_server_api.start()
@@ -201,6 +211,7 @@ class SMEBot(commands.Bot):
     async def close(self):
         await self.web_endpoint_server.stop()
         await self.game_server_api.close()
+        await self.blender_mcp_client.close() # 追加
         await super().close()
 
 async def on_message(self, message):
