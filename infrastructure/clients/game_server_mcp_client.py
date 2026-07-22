@@ -123,7 +123,9 @@ class GameServerMCPClient:
     async def _call_tool(self, tool_name: str, arguments: dict | None = None) -> dict:
         async with self._lock:
             try:
-                await self._connect_locked(force=False)
+                conn_res = await self._connect_locked(force=False)
+                if not conn_res.get("success"):
+                    return conn_res
                 assert self._session is not None
                 result = await self._session.call_tool(tool_name, arguments=arguments or {})
             except Exception as error:
@@ -178,18 +180,66 @@ class GameServerMCPClient:
         if force:
             await self._close_locked()
 
+        # 【追加】URLが無効またはローカルでサーバーが立っていない場合は通信を試みずに即失敗を返す
+        # これにより streamable_http_client のバックグラウンドタスク生成自体を防止します
+        if not self.mcp_url or "127.0.0.1:8000" in self.mcp_url:
+            self._discovery_cache = {
+                "success": False,
+                "url": self.mcp_url,
+                "error": "Game Server MCP URL is disabled or default local endpoint.",
+                "tools": [],
+                "resources": [],
+                "resource_templates": [],
+                "missing_tools": sorted(REQUIRED_TOOLS),
+                "missing_resources": sorted(REQUIRED_RESOURCES),
+                "missing_resource_templates": sorted(REQUIRED_RESOURCE_TEMPLATES),
+            }
+            return dict(self._discovery_cache)
+
         if self._session is None:
             self._exit_stack = AsyncExitStack()
-            read_stream, write_stream, _ = await self._exit_stack.enter_async_context(
-                streamable_http_client(self.mcp_url)
-            )
-            self._session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
-            await self._session.initialize()
+            try:
+                # タイムアウトを短く設定して失敗時は即座にスタックをクリーンアップ
+                read_stream, write_stream, _ = await asyncio.wait_for(
+                    self._exit_stack.enter_async_context(streamable_http_client(self.mcp_url)),
+                    timeout=3.0
+                )
+                self._session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
+                await asyncio.wait_for(self._session.initialize(), timeout=3.0)
+            except Exception as error:
+                await self._close_locked()
+                self._discovery_cache = {
+                    "success": False,
+                    "url": self.mcp_url,
+                    "error": f"Game Server MCP Connection failed: {error}",
+                    "tools": [],
+                    "resources": [],
+                    "resource_templates": [],
+                    "missing_tools": sorted(REQUIRED_TOOLS),
+                    "missing_resources": sorted(REQUIRED_RESOURCES),
+                    "missing_resource_templates": sorted(REQUIRED_RESOURCE_TEMPLATES),
+                }
+                return dict(self._discovery_cache)
 
         assert self._session is not None
-        tools_response = await self._session.list_tools()
-        resources_response = await self._session.list_resources()
-        templates_response = await self._session.list_resource_templates()
+        try:
+            tools_response = await self._session.list_tools()
+            resources_response = await self._session.list_resources()
+            templates_response = await self._session.list_resource_templates()
+        except Exception as error:
+            await self._close_locked()
+            self._discovery_cache = {
+                "success": False,
+                "url": self.mcp_url,
+                "error": f"Failed to list MCP capabilities: {error}",
+                "tools": [],
+                "resources": [],
+                "resource_templates": [],
+                "missing_tools": sorted(REQUIRED_TOOLS),
+                "missing_resources": sorted(REQUIRED_RESOURCES),
+                "missing_resource_templates": sorted(REQUIRED_RESOURCE_TEMPLATES),
+            }
+            return dict(self._discovery_cache)
 
         tool_names = [tool.name for tool in tools_response.tools]
         resource_uris = [str(resource.uri) for resource in resources_response.resources]
@@ -212,7 +262,10 @@ class GameServerMCPClient:
 
     async def _close_locked(self):
         if self._exit_stack is not None:
-            await self._exit_stack.aclose()
+            try:
+                await self._exit_stack.aclose()
+            except Exception:
+                pass
         self._exit_stack = None
         self._session = None
         self._discovery_cache = None
