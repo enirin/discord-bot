@@ -7,7 +7,7 @@ import sys
 from application.repositories import GameServerCatalogRepository
 from application.services import GameServerOperationService
 from infrastructure.cache import GameServerCatalogCacheClient
-from infrastructure.clients import GameServerMCPClient
+from infrastructure.clients import GameServerMCPClient, BlenderMCPClient
 from infrastructure.web import WebEndpointServer
 
 
@@ -116,6 +116,9 @@ class SMEBot(commands.Bot):
         intents = discord.Intents.default()
         intents.message_content = True
         self.config = config_data
+        # Blender MCP Clientの追加（設定があればそのURL、無ければデフォルト）
+        blender_mcp_url = self.config.get("blender_mcp_url", "http://127.0.0.1:9876/sse")
+        self.blender_mcp_client = BlenderMCPClient(blender_mcp_url)
         mcp_url = self.config.get("game_server_mcp_url") or self.config.get("game_api_url") or "http://127.0.0.1:8000/mcp"
         self.game_server_api = GameServerMCPClient(mcp_url)
         self.game_server_catalog_repository = GameServerCatalogRepository(
@@ -133,8 +136,20 @@ class SMEBot(commands.Bot):
         """起動時にCogsを読み込み、Webエンドポイントサーバーを起動する。"""
         await self.web_endpoint_server.start()
 
+        # Blender MCP のスタート (3秒でタイムアウト判定)
         try:
-            discovery = await self.game_server_api.start()
+            blender_discovery = await asyncio.wait_for(
+                self.blender_mcp_client.start(), timeout=10.0
+            )
+            print(f"Connected to Blender MCP: {blender_discovery}")
+        except Exception as error:
+            print(f"Blender MCP initialization failed or timed out: {error}")
+
+        # ゲームサーバー MCP のスタート (3秒でタイムアウト判定)
+        try:
+            discovery = await asyncio.wait_for(
+                self.game_server_api.start(), timeout=3.0
+            )
             if discovery.get("success"):
                 print(
                     "Connected to game server MCP: "
@@ -151,7 +166,7 @@ class SMEBot(commands.Bot):
                 )
             self.game_server_mcp_discovery = discovery
         except Exception as error:
-            print(f"Game server MCP initialization failed: {error}")
+            print(f"Game server MCP initialization failed or timed out: {error}")
             self.game_server_mcp_discovery = {"success": False, "error": str(error)}
 
         for filename in os.listdir('./cogs'):
@@ -168,7 +183,7 @@ class SMEBot(commands.Bot):
                 print(f"Synced {len(synced)} command(s) to guild {GUILD_ID}.")
             else:
                 synced = await self.tree.sync()
-                print(f"Synced {len(synced)} command(s) globally. (Note: Global sync can take up to 1 hour to propagate.)")
+                print(f"Synced {len(synced)} command(s) globally.")
         except Exception as e:
             print(f"Failed to sync commands: {e}")
 
@@ -201,9 +216,10 @@ class SMEBot(commands.Bot):
     async def close(self):
         await self.web_endpoint_server.stop()
         await self.game_server_api.close()
+        await self.blender_mcp_client.close() # 追加
         await super().close()
 
-async def on_message(self, message):
+    async def on_message(self, message):
         # 1. 自分自身と他のBotを無視
         if message.author == self.user:
             return

@@ -37,6 +37,7 @@ class Chat(commands.Cog):
             bot.game_server_api,
             bot.game_server_catalog_repository,
             bot.game_server_operation_service,
+            getattr(bot, "blender_mcp_client", None),
         )
 
     def _get_conversation(self, channel_id):
